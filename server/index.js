@@ -28,6 +28,8 @@ const loginSessions = new SessionStore()
 
 // 数据分析模块
 const { accessLogger, logDownload, getStats } = require('./analytics')
+// 看板娘聊天 AI
+const { registerChatAPI } = require('./chat')
 
 // 中间件
 app.use(cors({ origin: true, credentials: true }))
@@ -396,16 +398,44 @@ async function parseBilibiliVideo(url, cookies) {
     description: info.desc,
     cover: info.pic,
     duration: info.duration,
+    pubdate: info.pubdate,
     author: info.owner?.name,
+    authorMid: info.owner?.mid,
     authorAvatar: info.owner?.face,
     views: info.stat?.view,
     likes: info.stat?.like,
+    coins: info.stat?.coin,
+    favorites: info.stat?.favorite,
+    shares: info.stat?.share,
+    replies: info.stat?.reply,
+    danmakus: info.stat?.danmaku,
     bvid: info.bvid,
     aid: info.aid,
     cid: info.cid,
     pages: info.pages,
   }
 }
+
+// ==================== 弹幕下载 ====================
+app.get('/api/bilibili/danmaku/:cid', async (req, res) => {
+  try {
+    const { cid } = req.params
+    const response = await axios.get(`https://comment.bilibili.com/${cid}.xml`, {
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://www.bilibili.com/',
+      },
+      decompress: true,
+    })
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="danmaku_${cid}.xml"`)
+    res.send(response.data)
+  } catch (error) {
+    console.error('[Danmaku] 获取失败:', error.message)
+    res.status(500).json({ success: false, error: '弹幕获取失败' })
+  }
+})
 
 // ==================== 头像代理 ====================
 app.get('/api/proxy/avatar', async (req, res) => {
@@ -523,6 +553,9 @@ app.get('/api/admin/stats', (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
 })
+
+// ==================== 看板娘聊天 ====================
+registerChatAPI(app)
 
 // ==================== 启动 ====================
 app.listen(PORT, () => {

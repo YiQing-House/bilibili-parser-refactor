@@ -5,8 +5,12 @@
 export interface VideoData {
   title: string
   author: string
+  authorAvatar?: string
+  authorMid?: number
   thumbnail: string
-  duration: string
+  cover?: string
+  duration: string | number
+  pubdate?: number
   bvid?: string
   aid?: number
   cid?: number
@@ -14,6 +18,15 @@ export interface VideoData {
   platform?: string
   maxQuality?: number
   qualities?: QualityOption[]
+  description?: string
+  // 统计数据
+  views?: number
+  likes?: number
+  coins?: number
+  favorites?: number
+  shares?: number
+  replies?: number
+  danmakus?: number
 }
 
 export interface QualityOption {

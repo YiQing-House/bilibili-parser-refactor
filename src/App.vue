@@ -60,6 +60,8 @@
   <!-- 个人中心侧边栏 -->
   <UserProfile />
 
+  <!-- 智能看板娘（聊天输入框直接注入 #waifu 容器，不需要独立组件） -->
+
   <!-- 通告弹窗 -->
   <Teleport to="body">
     <Transition name="modal">
@@ -102,11 +104,13 @@ import DownloadManager from '@/components/common/DownloadManager.vue'
 import UserProfile from '@/components/common/UserProfile.vue'
 import AppToast from '@/components/common/AppToast.vue'
 import api from '@/services/api'
+import { useMascot } from '@/composables/useMascot'
 
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const downloadStore = useDownloadStore()
 const carousel = useCarousel()
+const mascot = useMascot()
 const toastRef = ref<InstanceType<typeof AppToast>>()
 
 // 通告系统

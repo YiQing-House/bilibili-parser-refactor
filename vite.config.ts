@@ -10,10 +10,10 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: 9528,
     proxy: {
       '/api': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:9527',
         changeOrigin: true,
         // 关键：转发 cookie 以支持登录会话
         cookieDomainRewrite: { '*': '' },
@@ -31,7 +31,7 @@ export default defineConfig({
         },
       },
       '/admin': {
-        target: 'http://localhost:3000',
+        target: 'http://localhost:9527',
         changeOrigin: true,
       },
     },
