@@ -1,0 +1,100 @@
+// ============================================================
+// 响应式断点 Mixins (320/768/1024/1440/1920)
+// ============================================================
+
+@mixin mobile {
+  @media (max-width: 767px) { @content; }
+}
+
+@mixin tablet {
+  @media (min-width: 768px) and (max-width: 1023px) { @content; }
+}
+
+@mixin desktop {
+  @media (min-width: 1024px) and (max-width: 1439px) { @content; }
+}
+
+@mixin wide {
+  @media (min-width: 1440px) and (max-width: 1919px) { @content; }
+}
+
+@mixin ultrawide {
+  @media (min-width: 1920px) { @content; }
+}
+
+@mixin tablet-up {
+  @media (min-width: 768px) { @content; }
+}
+
+@mixin desktop-up {
+  @media (min-width: 1024px) { @content; }
+}
+
+@mixin wide-up {
+  @media (min-width: 1440px) { @content; }
+}
+
+// ============================================================
+// UI Mixins
+// ============================================================
+
+@mixin glass {
+  backdrop-filter: var(--backdrop-blur);
+  -webkit-backdrop-filter: var(--backdrop-blur);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card-inner);
+}
+
+@mixin glass-elevated {
+  backdrop-filter: var(--backdrop-blur);
+  -webkit-backdrop-filter: var(--backdrop-blur);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+}
+
+@mixin text-ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@mixin text-clamp($lines: 2) {
+  display: -webkit-box;
+  -webkit-line-clamp: $lines;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+@mixin focus-ring($color: var(--color-blue)) {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.1), 0 0 0 4px $color;
+}
+
+@mixin btn-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-sm);
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: var(--font-family);
+  font-weight: var(--font-weight-medium);
+  transition: all var(--transition-fast);
+  user-select: none;
+  &:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+}
+
+@mixin card {
+  @include glass;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm), var(--shadow-card-inner);
+  transition: all var(--transition-base);
+}
+
+// Smooth scrollbar hide
+@mixin hide-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar { display: none; }
+}

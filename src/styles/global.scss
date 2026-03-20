@@ -1,0 +1,187 @@
+@use 'variables';
+@use 'reset';
+@use 'mixins' as *;
+
+// 炫彩鼠标指针（三套统一风格）
+*, *::before, *::after { cursor: url("/cursor.svg") 2 1, auto; }
+a, button, [role="button"], select, option, label, .toggle, .side-btn, .clickable { cursor: url("/cursor-pointer.svg") 6 2, pointer !important; }
+input, textarea { cursor: url("/cursor-text.svg") 8 12, text !important; }
+
+// ============================================================
+// 全局保护：禁止选中文字 & 右键菜单（搜索框除外）
+// ============================================================
+
+* {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+// 搜索框允许选中文字
+input[type="text"],
+input[type="search"],
+input:not([type]),
+textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+// ============================================================
+// 全局布局
+// ============================================================
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+
+.container {
+  width: 100%;
+  max-width: var(--container-max-width);
+  margin: 0 auto;
+  padding: 0 var(--spacing-md);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 2;
+  overflow: hidden;
+
+  @include wide-up {
+    max-width: 1080px;
+  }
+}
+
+// ============================================================
+// 背景轮播系统 — 双层交替淡入淡出
+// z-index: bg(0) → overlay(1) → content(2)
+// ============================================================
+
+.bg-carousel {
+  position: fixed;
+  top: var(--nav-height);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 0;
+
+  // 双层子 div，绝对定位叠放
+  &__layer {
+    position: absolute;
+    inset: 0;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-image: linear-gradient(135deg, #1a1a1a 0%, #212121 50%, #1c1c1c 100%);
+    opacity: 0;
+    transition: opacity var(--bg-fade-duration) ease-in-out;
+
+    &.active {
+      opacity: 1;
+    }
+  }
+
+  &__overlay {
+    position: fixed;
+    top: var(--nav-height);
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1;
+    pointer-events: none;
+    transition: background var(--transition-slow);
+
+    // 中间区域极淡，header/footer 加暗
+    background:
+      linear-gradient(
+        to top,
+        rgba(0, 0, 0, var(--overlay-gradient-opacity)) 0%,
+        rgba(0, 0, 0, 0) 30%
+      ),
+      linear-gradient(
+        180deg,
+        rgba(33, 33, 33, 0.80) 0%,
+        rgba(33, 33, 33, 0.20) 18%,
+        rgba(33, 33, 33, 0.15) 50%,
+        rgba(33, 33, 33, 0.20) 78%,
+        rgba(33, 33, 33, 0.85) 100%
+      );
+  }
+}
+
+// 亮色主题遮罩
+[data-theme="light"] .bg-carousel__overlay {
+  background:
+    linear-gradient(
+      to top,
+      rgba(0, 0, 0, calc(var(--overlay-gradient-opacity) * 0.5)) 0%,
+      rgba(0, 0, 0, 0) 30%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(244, 244, 244, 0.85) 0%,
+      rgba(244, 244, 244, 0.30) 18%,
+      rgba(244, 244, 244, 0.20) 50%,
+      rgba(244, 244, 244, 0.30) 78%,
+      rgba(244, 244, 244, 0.90) 100%
+    );
+}
+
+// ============================================================
+// 动画
+// ============================================================
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+// ==================== Live2D 看板娘覆盖 ====================
+#waifu {
+  position: fixed !important;
+  left: 0 !important;
+  bottom: 0 !important;
+  z-index: 100 !important;
+  pointer-events: auto !important;
+
+  // 看板娘工具栏
+  #waifu-tool {
+    pointer-events: auto !important;
+  }
+  
+  // 画布可交互
+  canvas {
+    pointer-events: auto !important;
+  }
+
+  // 对话气泡
+  #waifu-tips {
+    pointer-events: none;
+  }
+}

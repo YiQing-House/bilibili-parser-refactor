@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#FB7299" />
+    <meta name="description" content="B站视频去水印下载助手 — 支持批量解析、收藏夹处理、多画质下载" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+    <title>视频去水印助手</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+    <!-- Live2D 看板娘（自定义加载，不覆写 window.Image 避免破坏背景轮播） -->
+    <script>
+      (function(){
+        var base = 'https://fastly.jsdelivr.net/npm/live2d-widgets@1.0.0-rc.6/dist/';
+        // 加载 CSS
+        var link = document.createElement('link');
+        link.rel = 'stylesheet'; link.href = base + 'waifu.css';
+        document.head.appendChild(link);
+        // 加载 JS
+        var script = document.createElement('script');
+        script.type = 'module'; script.src = base + 'waifu-tips.js';
+        script.onload = function() {
+          if (typeof initWidget === 'function') {
+            initWidget({
+              waifuPath: base + 'waifu-tips.json',
+              cdnPath: 'https://fastly.jsdelivr.net/gh/fghrsh/live2d_api/',
+              cubism2Path: base + 'live2d.min.js',
+              cubism5Path: 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js',
+              tools: ['hitokoto', 'asteroids', 'switch-model', 'switch-texture', 'photo', 'info', 'quit'],
+              logLevel: 'warn',
+              drag: false,
+            });
+          }
+        };
+        document.head.appendChild(script);
+      })();
+    </script>
+  </body>
+</html>

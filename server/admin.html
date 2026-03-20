@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>通告管理 - 视频去水印助手</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; display: flex; justify-content: center; padding: 40px 16px; }
+    .wrap { width: 520px; max-width: 100%; }
+    .card { background: #1a1a2e; border: 1px solid #333; border-radius: 16px; padding: 28px; margin-bottom: 20px; }
+    h1 { font-size: 1.3rem; margin-bottom: 20px; background: linear-gradient(135deg, #fb7299, #00a1d6); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    h2 { font-size: 1rem; margin-bottom: 14px; color: #ccc; }
+    label { display: block; font-size: 0.82rem; color: #999; margin-bottom: 5px; margin-top: 14px; }
+    input, textarea { width: 100%; padding: 9px 12px; background: #16213e; border: 1px solid #333; border-radius: 8px; color: #e0e0e0; font-size: 0.9rem; outline: none; font-family: inherit; }
+    input:focus, textarea:focus { border-color: #fb7299; }
+    textarea { min-height: 90px; resize: vertical; }
+    .row { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+    .toggle { position: relative; width: 40px; height: 22px; background: #333; border-radius: 11px; cursor: pointer; transition: background 0.3s; flex-shrink: 0; }
+    .toggle.on { background: #fb7299; }
+    .toggle::after { content: ''; position: absolute; width: 18px; height: 18px; background: white; border-radius: 50%; top: 2px; left: 2px; transition: transform 0.3s; }
+    .toggle.on::after { transform: translateX(18px); }
+    .btn { display: block; width: 100%; margin-top: 20px; padding: 10px; background: linear-gradient(135deg, #fb7299, #e91e63); color: white; border: none; border-radius: 8px; font-size: 0.95rem; cursor: pointer; }
+    .btn:hover { opacity: 0.9; } .btn:disabled { opacity: 0.5; }
+    .msg { margin-top: 10px; padding: 8px; border-radius: 6px; font-size: 0.82rem; text-align: center; display: none; }
+    .msg.ok { display: block; background: rgba(46,213,115,0.15); color: #2ed573; }
+    .msg.err { display: block; background: rgba(255,71,87,0.15); color: #ff4757; }
+    .links { display: flex; gap: 14px; margin-bottom: 20px; font-size: 0.85rem; }
+    .links a { color: #00a1d6; text-decoration: none; } .links a:hover { text-decoration: underline; }
+    .ann-list { display: flex; flex-direction: column; gap: 10px; }
+    .ann-card-item { background: #16213e; border: 1px solid #262640; border-radius: 10px; padding: 14px; position: relative; }
+    .ann-card-item.disabled { opacity: 0.5; }
+    .ann-card-item .title { font-weight: 600; color: #fb7299; font-size: 0.9rem; margin-bottom: 4px; }
+    .ann-card-item .content { font-size: 0.8rem; color: #aaa; line-height: 1.5; margin-bottom: 6px; white-space: pre-line; max-height: 60px; overflow: hidden; }
+    .ann-card-item .meta { font-size: 0.7rem; color: #666; display: flex; justify-content: space-between; align-items: center; }
+    .del-btn { background: none; border: 1px solid rgba(255,71,87,0.3); color: #ff4757; padding: 2px 10px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; }
+    .del-btn:hover { background: rgba(255,71,87,0.1); }
+    .tag-on { color: #2ed573; } .tag-off { color: #888; }
+    .empty { text-align: center; color: #555; padding: 20px; font-size: 0.85rem; }
+    .pwd-row { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
+    .pwd-row input { flex: 1; }
+    .pwd-row button { padding: 9px 16px; background: #16213e; border: 1px solid #333; color: #e0e0e0; border-radius: 8px; cursor: pointer; font-size: 0.85rem; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="links">
+      <a href="/admin/dashboard">📊 数据看板</a>
+      <span style="color:#333">|</span>
+      <span style="color:#fb7299">📢 通告管理</span>
+    </div>
+
+    <!-- 密码输入 -->
+    <div class="card">
+      <h1>📢 通告管理</h1>
+      <div class="pwd-row">
+        <input type="password" id="pwd" placeholder="输入管理密码">
+        <button onclick="loadHistory()">加载</button>
+      </div>
+
+      <label>通告标题</label>
+      <input type="text" id="title" placeholder="例如：系统维护通知">
+      <label>通告内容（支持换行）</label>
+      <textarea id="content" placeholder="在这里写通告内容..."></textarea>
+      <div class="row">
+        <div class="toggle on" id="toggle" onclick="this.classList.toggle('on')"></div>
+        <span style="font-size:0.85rem">启用</span>
+      </div>
+      <button class="btn" onclick="publish()">🚀 发布新通告</button>
+      <div class="msg" id="msg"></div>
+    </div>
+
+    <!-- 历史通告 -->
+    <div class="card">
+      <h2>📋 历史通告</h2>
+      <div class="ann-list" id="historyList">
+        <div class="empty">输入密码后点「加载」查看</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let pwd = '';
+
+    async function loadHistory() {
+      pwd = document.getElementById('pwd').value;
+      if (!pwd) return;
+      try {
+        const res = await fetch('/api/admin/announcements?password=' + encodeURIComponent(pwd));
+        const json = await res.json();
+        if (!json.success) { alert(json.error || '加载失败'); return; }
+        renderHistory(json.data || []);
+      } catch (e) { alert('网络错误'); }
+    }
+
+    function renderHistory(list) {
+      const el = document.getElementById('historyList');
+      if (!list.length) { el.innerHTML = '<div class="empty">暂无通告</div>'; return; }
+      el.innerHTML = list.map(a => `
+        <div class="ann-card-item ${a.enabled ? '' : 'disabled'}">
+          <div class="title">${esc(a.title || '无标题')}</div>
+          <div class="content">${esc(a.content)}</div>
+          <div class="meta">
+            <span>${new Date(a.updatedAt).toLocaleString('zh-CN')} · <span class="${a.enabled ? 'tag-on' : 'tag-off'}">${a.enabled ? '已启用' : '已禁用'}</span></span>
+            <button class="del-btn" onclick="delAnn('${a.id}')">删除</button>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    async function publish() {
+      pwd = document.getElementById('pwd').value;
+      const msgEl = document.getElementById('msg');
+      msgEl.className = 'msg';
+      if (!pwd) { msgEl.className = 'msg err'; msgEl.textContent = '请输入密码'; return; }
+      try {
+        const res = await fetch('/api/admin/announcement', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            password: pwd,
+            title: document.getElementById('title').value,
+            content: document.getElementById('content').value,
+            enabled: document.getElementById('toggle').classList.contains('on'),
+          }),
+        });
+        const json = await res.json();
+        if (json.success) {
+          msgEl.className = 'msg ok'; msgEl.textContent = '✅ 通告已发布！';
+          document.getElementById('title').value = '';
+          document.getElementById('content').value = '';
+          loadHistory();
+        } else {
+          msgEl.className = 'msg err'; msgEl.textContent = '❌ ' + (json.error || '发布失败');
+        }
+      } catch (e) { msgEl.className = 'msg err'; msgEl.textContent = '网络错误'; }
+    }
+
+    async function delAnn(id) {
+      if (!confirm('确定删除这条通告？')) return;
+      try {
+        await fetch('/api/admin/announcement/' + id + '?password=' + encodeURIComponent(pwd), { method: 'DELETE' });
+        loadHistory();
+      } catch {}
+    }
+
+    function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  </script>
+</body>
+</html>

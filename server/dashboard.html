@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>数据看板 - 视频去水印助手</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a1a; color: #e0e0e0; min-height: 100vh; }
+    
+    .topbar { background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+    .topbar h1 { font-size: 1.2rem; background: linear-gradient(135deg, #fb7299, #00a1d6); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .topbar-right { display: flex; gap: 12px; align-items: center; }
+    .topbar a { color: #fb7299; text-decoration: none; font-size: 0.85rem; }
+    .topbar a:hover { text-decoration: underline; }
+    
+    .date-select { background: #16213e; border: 1px solid #333; color: #e0e0e0; padding: 6px 10px; border-radius: 6px; font-size: 0.85rem; cursor: pointer; }
+    
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding: 20px 24px; }
+    
+    .stat-card { background: #1a1a2e; border: 1px solid #262640; border-radius: 12px; padding: 20px; text-align: center; transition: border-color 0.3s; }
+    .stat-card:hover { border-color: #fb7299; }
+    .stat-card .label { font-size: 0.8rem; color: #888; margin-bottom: 8px; }
+    .stat-card .value { font-size: 2rem; font-weight: 700; background: linear-gradient(135deg, #fb7299, #00a1d6); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .stat-card .sub { font-size: 0.75rem; color: #666; margin-top: 4px; }
+    
+    .section { padding: 0 24px 20px; }
+    .section-title { font-size: 1rem; font-weight: 600; margin-bottom: 12px; color: #ccc; display: flex; align-items: center; gap: 8px; }
+    
+    .chart-container { background: #1a1a2e; border: 1px solid #262640; border-radius: 12px; padding: 16px; margin-bottom: 20px; }
+    .chart-bar { display: flex; align-items: flex-end; gap: 4px; height: 120px; padding: 0 8px; }
+    .bar-col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+    .bar-fill { width: 100%; border-radius: 3px 3px 0 0; transition: height 0.5s; min-height: 1px; }
+    .bar-fill.visits { background: linear-gradient(180deg, #00a1d6, #0078a8); }
+    .bar-fill.downloads { background: linear-gradient(180deg, #fb7299, #c44569); }
+    .bar-label { font-size: 9px; color: #666; }
+    .bar-value { font-size: 9px; color: #999; }
+    .chart-legend { display: flex; gap: 16px; justify-content: center; margin-top: 8px; font-size: 0.75rem; color: #888; }
+    .legend-dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; margin-right: 4px; vertical-align: middle; }
+    
+    .table-wrap { background: #1a1a2e; border: 1px solid #262640; border-radius: 12px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    thead { background: #16213e; }
+    th { padding: 10px 12px; text-align: left; color: #999; font-weight: 500; white-space: nowrap; }
+    td { padding: 8px 12px; border-top: 1px solid #1f1f3a; color: #ccc; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    tr:hover td { background: rgba(251, 114, 153, 0.05); }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; }
+    .tag-user { background: rgba(0, 161, 214, 0.2); color: #00a1d6; }
+    .tag-guest { background: rgba(153, 153, 153, 0.15); color: #999; }
+    
+    .device-list { display: flex; flex-wrap: wrap; gap: 8px; }
+    .device-chip { background: #16213e; border: 1px solid #262640; border-radius: 8px; padding: 6px 12px; font-size: 0.8rem; display: flex; gap: 6px; align-items: center; }
+    .device-chip .count { color: #fb7299; font-weight: 600; }
+    
+    .tabs { display: flex; gap: 0; padding: 0 24px; margin-bottom: 0; }
+    .tab { padding: 10px 20px; cursor: pointer; font-size: 0.85rem; color: #888; border-bottom: 2px solid transparent; transition: all 0.2s; }
+    .tab:hover { color: #e0e0e0; }
+    .tab.active { color: #fb7299; border-bottom-color: #fb7299; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    
+    .loading { text-align: center; padding: 60px; color: #666; }
+    .empty { text-align: center; padding: 40px; color: #555; font-size: 0.9rem; }
+    
+    .pwd-gate { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .pwd-card { background: #1a1a2e; border: 1px solid #333; border-radius: 16px; padding: 32px; width: 360px; text-align: center; }
+    .pwd-card h2 { font-size: 1.2rem; margin-bottom: 20px; color: #fb7299; }
+    .pwd-card input { width: 100%; padding: 10px 14px; background: #16213e; border: 1px solid #333; border-radius: 8px; color: #e0e0e0; font-size: 0.95rem; outline: none; text-align: center; margin-bottom: 16px; }
+    .pwd-card input:focus { border-color: #fb7299; }
+    .pwd-card button { padding: 10px 24px; background: linear-gradient(135deg, #fb7299, #e91e63); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
+    .pwd-card .err { color: #ff4757; font-size: 0.8rem; margin-top: 8px; }
+    
+    @media (max-width: 600px) {
+      .grid { grid-template-columns: repeat(2, 1fr); padding: 12px; gap: 10px; }
+      .section { padding: 0 12px 16px; }
+      .stat-card .value { font-size: 1.4rem; }
+      table { font-size: 0.7rem; }
+    }
+  </style>
+</head>
+<body>
+  <!-- 密码验证 -->
+  <div id="pwdGate" class="pwd-gate">
+    <div class="pwd-card">
+      <h2>📊 数据看板</h2>
+      <input type="password" id="pwdInput" placeholder="输入管理密码" onkeydown="if(event.key==='Enter')unlock()">
+      <br>
+      <button onclick="unlock()">进入看板</button>
+      <div class="err" id="pwdErr"></div>
+    </div>
+  </div>
+
+  <!-- 看板主体 -->
+  <div id="dashboard" style="display:none">
+    <div class="topbar">
+      <h1>📊 数据看板</h1>
+      <div class="topbar-right">
+        <select class="date-select" id="dateSelect" onchange="loadStats(this.value)"></select>
+        <a href="/admin">← 通告管理</a>
+      </div>
+    </div>
+
+    <!-- 概览卡片 -->
+    <div class="grid" id="statsGrid"></div>
+
+    <!-- 小时分布图 -->
+    <div class="section">
+      <div class="section-title">📈 24小时分布</div>
+      <div class="chart-container">
+        <div class="chart-bar" id="hourlyChart"></div>
+        <div class="chart-legend">
+          <span><span class="legend-dot" style="background:#00a1d6"></span>访问</span>
+          <span><span class="legend-dot" style="background:#fb7299"></span>解析</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('downloads')">下载记录</div>
+      <div class="tab" onclick="switchTab('visits')">访问记录</div>
+      <div class="tab" onclick="switchTab('devices')">设备统计</div>
+    </div>
+
+    <!-- 下载记录 -->
+    <div class="section tab-content active" id="tab-downloads">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>用户</th><th>视频标题</th><th>UP主</th><th>IP</th><th>设备</th></tr></thead>
+          <tbody id="downloadTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 访问记录 -->
+    <div class="section tab-content" id="tab-visits">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>时间</th><th>用户</th><th>路径</th><th>方法</th><th>IP</th><th>设备</th></tr></thead>
+          <tbody id="visitTable"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 设备统计 -->
+    <div class="section tab-content" id="tab-devices">
+      <div class="device-list" id="deviceList"></div>
+    </div>
+  </div>
+
+  <script>
+    let pwd = '';
+
+    function unlock() {
+      pwd = document.getElementById('pwdInput').value;
+      if (!pwd) { document.getElementById('pwdErr').textContent = '请输入密码'; return; }
+      // 验证密码 - 通过尝试获取数据来验证
+      fetch('/api/admin/stats?password=' + encodeURIComponent(pwd))
+        .then(r => r.json())
+        .then(d => {
+          if (d.success) {
+            document.getElementById('pwdGate').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'block';
+            renderDates(d.data.availableDates);
+            render(d.data);
+          } else {
+            document.getElementById('pwdErr').textContent = '密码错误';
+          }
+        })
+        .catch(() => { document.getElementById('pwdErr').textContent = '无法连接服务器'; });
+    }
+
+    function loadStats(date) {
+      fetch('/api/admin/stats?password=' + encodeURIComponent(pwd) + '&date=' + date)
+        .then(r => r.json())
+        .then(d => { if (d.success) render(d.data); });
+    }
+
+    function renderDates(dates) {
+      const sel = document.getElementById('dateSelect');
+      sel.innerHTML = '';
+      (dates || []).forEach(d => {
+        const opt = document.createElement('option');
+        opt.value = d; opt.textContent = d;
+        sel.appendChild(opt);
+      });
+      if (!dates || !dates.length) {
+        const opt = document.createElement('option');
+        opt.value = new Date().toISOString().slice(0,10);
+        opt.textContent = '今天';
+        sel.appendChild(opt);
+      }
+    }
+
+    function render(data) {
+      // 概览卡片
+      document.getElementById('statsGrid').innerHTML = `
+        <div class="stat-card">
+          <div class="label">总访问量</div>
+          <div class="value">${data.totalVisits}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">独立访客 (IP)</div>
+          <div class="value">${data.uniqueVisitors}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">视频解析次数</div>
+          <div class="value">${data.totalDownloads}</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">登录用户 / 游客</div>
+          <div class="value">${data.loggedInCount} <span style="font-size:1rem;-webkit-text-fill-color:#666">/</span> ${data.guestCount}</div>
+          <div class="sub">登录用户 vs 游客解析</div>
+        </div>
+      `;
+
+      // 小时分布图
+      const maxV = Math.max(...data.hourlyVisits, 1);
+      const maxD = Math.max(...data.hourlyDownloads, 1);
+      const maxAll = Math.max(maxV, maxD, 1);
+      let chartHTML = '';
+      for (let h = 0; h < 24; h++) {
+        const vH = Math.round((data.hourlyVisits[h] / maxAll) * 100);
+        const dH = Math.round((data.hourlyDownloads[h] / maxAll) * 100);
+        chartHTML += `<div class="bar-col">
+          <div class="bar-value">${data.hourlyVisits[h] || ''}</div>
+          <div style="display:flex;gap:2px;align-items:flex-end;width:100%;height:100%">
+            <div class="bar-fill visits" style="height:${vH}%;flex:1"></div>
+            <div class="bar-fill downloads" style="height:${dH}%;flex:1"></div>
+          </div>
+          <div class="bar-label">${h}</div>
+        </div>`;
+      }
+      document.getElementById('hourlyChart').innerHTML = chartHTML;
+
+      // 下载记录
+      const dtbody = document.getElementById('downloadTable');
+      if (!data.recentDownloads || !data.recentDownloads.length) {
+        dtbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#555;padding:30px">暂无解析记录</td></tr>';
+      } else {
+        dtbody.innerHTML = data.recentDownloads.map(d => `<tr>
+          <td>${fmtTime(d.time)}</td>
+          <td>${d.user === '游客' ? '<span class="tag tag-guest">游客</span>' : '<span class="tag tag-user">' + esc(d.user) + '</span>'}</td>
+          <td title="${esc(d.video?.title)}">${esc(d.video?.title || '-')}</td>
+          <td>${esc(d.video?.author || '-')}</td>
+          <td>${maskIP(d.ip)}</td>
+          <td>${esc(d.device)}</td>
+        </tr>`).join('');
+      }
+
+      // 访问记录
+      const vtbody = document.getElementById('visitTable');
+      if (!data.recentVisits || !data.recentVisits.length) {
+        vtbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#555;padding:30px">暂无访问记录</td></tr>';
+      } else {
+        vtbody.innerHTML = data.recentVisits.map(v => `<tr>
+          <td>${fmtTime(v.time)}</td>
+          <td>${v.user === '游客' ? '<span class="tag tag-guest">游客</span>' : '<span class="tag tag-user">' + esc(v.user) + '</span>'}</td>
+          <td>${esc(v.path)}</td>
+          <td>${v.method}</td>
+          <td>${maskIP(v.ip)}</td>
+          <td>${esc(v.device)}</td>
+        </tr>`).join('');
+      }
+
+      // 设备统计
+      const dlist = document.getElementById('deviceList');
+      if (!data.topDevices || !data.topDevices.length) {
+        dlist.innerHTML = '<div class="empty">暂无设备数据</div>';
+      } else {
+        dlist.innerHTML = data.topDevices.map(d =>
+          `<div class="device-chip"><span>${esc(d.name)}</span><span class="count">${d.count}</span></div>`
+        ).join('');
+      }
+    }
+
+    function fmtTime(iso) {
+      if (!iso) return '-';
+      const d = new Date(iso);
+      return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function maskIP(ip) {
+      if (!ip) return '-';
+      // 部分脱敏：保留前两段
+      const parts = ip.split('.');
+      if (parts.length === 4) return parts[0] + '.' + parts[1] + '.*.*';
+      return ip.replace(/::.*/, '::***');
+    }
+
+    function esc(s) { 
+      if (!s) return '';
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function switchTab(name) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+      document.querySelector(`#tab-${name}`).classList.add('active');
+      event.target.classList.add('active');
+    }
+  </script>
+</body>
+</html>
