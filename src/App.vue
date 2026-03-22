@@ -1,5 +1,5 @@
 <template>
-  <!-- 背景图容器 — 双层交替淡入淡出 -->
+  <!-- 背景图/视频容器 — 双层交替淡入淡出（视频 + 图片混合） -->
   <div
     class="bg-carousel"
     @mouseenter="carousel.pause()"
@@ -7,12 +7,33 @@
     @touchstart="carousel.onTouchStart"
     @touchend="carousel.onTouchEnd"
   >
+    <!-- Layer A -->
+    <video
+      v-if="carousel.layerAType.value === 'video' && carousel.layerAUrl.value"
+      class="bg-carousel__video"
+      :class="{ active: carousel.activeLayerA.value }"
+      :src="carousel.layerAUrl.value"
+      muted autoplay playsinline
+      @ended="carousel.onVideoEnded"
+    ></video>
     <div
+      v-else
       class="bg-carousel__layer"
       :class="{ active: carousel.activeLayerA.value }"
       :style="carousel.layerAUrl.value ? { backgroundImage: `url(${carousel.layerAUrl.value})` } : {}"
     ></div>
+
+    <!-- Layer B -->
+    <video
+      v-if="carousel.layerBType.value === 'video' && carousel.layerBUrl.value"
+      class="bg-carousel__video"
+      :class="{ active: !carousel.activeLayerA.value }"
+      :src="carousel.layerBUrl.value"
+      muted autoplay playsinline
+      @ended="carousel.onVideoEnded"
+    ></video>
     <div
+      v-else
       class="bg-carousel__layer"
       :class="{ active: !carousel.activeLayerA.value }"
       :style="carousel.layerBUrl.value ? { backgroundImage: `url(${carousel.layerBUrl.value})` } : {}"
