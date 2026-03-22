@@ -54,11 +54,9 @@
     </div>
 
     <!-- Footer 独立固定在最底部 -->
-    <footer class="page-footer">
-      <span>关于我们</span> · <span>使用说明</span> · <span>建议反馈</span>
-      <br />
-      <small>视频去水印助手 © 2026 · 仅供技术学习交流</small>
-    </footer>
+    <div class="page-footer">
+      <AppFooter />
+    </div>
 
     <LoginModal v-model:visible="showLogin" @login-success="handleToast('登录成功！', 'success')" />
   </div>
@@ -72,7 +70,7 @@ import SearchBox from '@/components/video/SearchBox.vue'
 import ResultRow from '@/components/video/ResultRow.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import LoginModal from '@/components/common/LoginModal.vue'
-// AppFooter 改为 page-footer inline 渲染，不再引入组件
+import AppFooter from '@/components/layout/AppFooter.vue'
 
 const videoStore = useVideoStore()
 const showLogin = ref(false)
@@ -249,19 +247,8 @@ function retry() { const u = videoStore.inputUrl.trim(); if (u) videoStore.smart
   left: 0;
   right: 0;
   text-align: center;
-  padding: 6px 0;
-  font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.35);
+  padding: 4px 0;
   z-index: 50;
-  pointer-events: none;
-
-  span {
-    pointer-events: auto;
-    cursor: pointer;
-    &:hover { color: rgba(255, 255, 255, 0.6); }
-  }
-
-  small { opacity: 0.7; }
 }
 
 // =================== 响应式 ===================
