@@ -13,17 +13,193 @@
     <title>视频去水印助手</title>
   </head>
   <body>
+    <!-- APlayer 全局音乐播放器 -->
+    <link rel="preload" href="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.css"></noscript>
+    <style>
+      /* ============================================================
+         APlayer 浮动音乐面板
+         ============================================================ */
+      #aplayer-float {
+        position: fixed;
+        right: 72px;
+        bottom: 20px;
+        z-index: 250;
+        width: 280px;
+        border-radius: 16px;
+        overflow: hidden;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+        transform: scale(0.92) translateX(16px);
+        opacity: 0;
+        pointer-events: none;
+        transition: transform 280ms cubic-bezier(0.16,1,0.3,1),
+                    opacity 280ms cubic-bezier(0.16,1,0.3,1);
+        will-change: transform, opacity;
+      }
+      #aplayer-float.show {
+        transform: scale(1) translateX(0);
+        opacity: 1;
+        pointer-events: auto;
+      }
+      /* 毛玻璃面板 */
+      #aplayer-float .aplayer {
+        background: rgba(33,33,33,0.82) !important;
+        backdrop-filter: blur(16px) saturate(130%);
+        -webkit-backdrop-filter: blur(16px) saturate(130%);
+        border: 1px solid rgba(251,114,153,0.12) !important;
+        border-radius: 16px !important;
+        margin: 0 !important;
+        font-family: 'Noto Sans SC', system-ui, sans-serif !important;
+      }
+      /* 封面 */
+      #aplayer-float .aplayer .aplayer-pic {
+        border-radius: 8px !important;
+        position: relative !important;
+      }
+      @keyframes aplayer-cover-spin { to { transform: rotate(360deg); } }
+      #aplayer-float .aplayer.aplayer-playing .aplayer-pic {
+        animation: aplayer-cover-spin 12s linear infinite;
+        border-radius: 50% !important;
+      }
+      /* 封面控件叠加 */
+      .cover-controls {
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        background: rgba(0,0,0,0.4);
+        border-radius: 8px;
+        opacity: 0;
+        transition: opacity 0.2s;
+        z-index: 10;
+      }
+      #aplayer-float:hover .cover-controls { opacity: 1; }
+      .cover-controls button {
+        background: none; border: none; color: #fff;
+        cursor: pointer; padding: 3px; font-size: 13px;
+        border-radius: 50%; width: 26px; height: 26px;
+        display: flex; align-items: center; justify-content: center;
+        transition: all 0.15s;
+      }
+      .cover-controls button:hover { background: rgba(251,114,153,0.5); transform: scale(1.15); }
+      .cover-controls .play-btn {
+        font-size: 16px; width: 30px; height: 30px;
+        background: rgba(251,114,153,0.6);
+      }
+      .cover-controls .play-btn:hover { background: rgba(251,114,153,0.85); }
+      /* 歌曲信息 - flex column 让控件沉底 */
+      #aplayer-float .aplayer .aplayer-info {
+        border-top-color: rgba(255,255,255,0.04) !important;
+        padding: 6px 8px 4px !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: space-between !important;
+      }
+      #aplayer-float .aplayer .aplayer-info .aplayer-music { margin-bottom: 0 !important; }
+      #aplayer-float .aplayer .aplayer-info .aplayer-music .aplayer-title {
+        color: #F1F1F1 !important; font-size: 0.78rem !important; font-weight: 500 !important;
+      }
+      #aplayer-float .aplayer .aplayer-info .aplayer-music .aplayer-author {
+        color: #A2A7B0 !important; font-size: 0.62rem !important;
+      }
+      /* 歌词区域 - flex 中间撑开 */
+      #aplayer-float .aplayer .aplayer-info .aplayer-lrc {
+        flex: 1 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        text-align: center !important;
+        overflow: visible !important;
+        height: auto !important;
+        min-height: 0 !important;
+        mask-image: none !important;
+        -webkit-mask-image: none !important;
+        transform: none !important;
+      }
+      /* 关键: 禁止 APlayer 的 translateY 滚动 */
+      #aplayer-float .aplayer .aplayer-lrc-contents {
+        transform: none !important;
+        transition: none !important;
+      }
+      #aplayer-float .aplayer .aplayer-lrc::before,
+      #aplayer-float .aplayer .aplayer-lrc::after { display: none !important; }
+      /* 只显示当前行，其他全隐藏 */
+      #aplayer-float .aplayer .aplayer-lrc p {
+        display: none !important;
+      }
+      #aplayer-float .aplayer .aplayer-lrc p.aplayer-lrc-current {
+        display: block !important;
+        font-size: 0.78rem !important;
+        font-weight: 600 !important;
+        color: #FB7299 !important;
+        line-height: 1.4 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        margin: 0 !important;
+        padding: 0 !important;
+      }
+      /* 进度条 - 在 info 底部 */
+      #aplayer-float .aplayer .aplayer-controller {
+        margin-top: auto !important;
+      }
+      #aplayer-float .aplayer .aplayer-bar-wrap { margin: 0 4px 0 0 !important; }
+      #aplayer-float .aplayer .aplayer-bar {
+        background: rgba(255,255,255,0.12) !important; height: 3px !important; border-radius: 99px !important;
+      }
+      #aplayer-float .aplayer .aplayer-played {
+        background: linear-gradient(90deg, #FB7299, #00A1D6) !important; border-radius: 99px !important;
+      }
+      #aplayer-float .aplayer .aplayer-thumb {
+        background: #FB7299 !important; width: 8px !important; height: 8px !important;
+        margin-top: -2.5px !important;
+        box-shadow: 0 0 6px rgba(251,114,153,0.35);
+      }
+      #aplayer-float .aplayer .aplayer-time {
+        color: #A2A7B0 !important; font-size: 0.6rem !important;
+        width: auto !important; flex-shrink: 0 !important;
+      }
+      #aplayer-float .aplayer .aplayer-icon { width: 14px !important; height: 14px !important; }
+      #aplayer-float .aplayer .aplayer-icon:hover path { fill: #FB7299 !important; }
+      /* 隐藏原生暂停按钮（已用封面控件替代）*/
+      #aplayer-float .aplayer .aplayer-pic .aplayer-button { display: none !important; }
+      /* 隐藏歌单 */
+      #aplayer-float .aplayer .aplayer-list { display: none !important; }
+      /* 亮色主题 */
+      [data-theme="light"] #aplayer-float .aplayer {
+        background: rgba(255,255,255,0.88) !important;
+        border-color: rgba(0,0,0,0.08) !important;
+      }
+      [data-theme="light"] #aplayer-float .aplayer .aplayer-title { color: #212121 !important; }
+      [data-theme="light"] #aplayer-float .aplayer .aplayer-bar { background: rgba(0,0,0,0.08) !important; }
+      [data-theme="light"] #aplayer-float .aplayer .aplayer-lrc p { color: rgba(97,102,109,0.5) !important; }
+      [data-theme="light"] #aplayer-float .aplayer .aplayer-lrc p.aplayer-lrc-current { color: #e74c8b !important; }
+      [data-theme="light"] #aplayer-float { box-shadow: 0 8px 32px rgba(0,0,0,0.12); }
+      /* 响应式 */
+      @media (max-width: 375px) { #aplayer-float { right: 8px; left: 8px; width: auto; bottom: 12px; } }
+      @media (min-width: 376px) and (max-width: 767px) { #aplayer-float { right: 10px; bottom: 16px; width: 250px; } }
+      @media (min-width: 1920px) { #aplayer-float { width: 300px; } }
+    </style>
+
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
-    <!-- Live2D 看板娘（自定义加载，不覆写 window.Image 避免破坏背景轮播） -->
+
+    <!-- 右下角浮动播放器 -->
+    <div id="aplayer-float" class="show" role="region" aria-label="音乐播放器">
+      <div id="aplayer-container"></div>
+    </div>
+
+    <!-- Live2D 看板娘 -->
     <script>
       (function(){
         var base = 'https://fastly.jsdelivr.net/npm/live2d-widgets@1.0.0-rc.6/dist/';
-        // 加载 CSS
         var link = document.createElement('link');
         link.rel = 'stylesheet'; link.href = base + 'waifu.css';
         document.head.appendChild(link);
-        // 加载 JS
         var script = document.createElement('script');
         script.type = 'module'; script.src = base + 'waifu-tips.js';
         script.onload = function() {
@@ -41,6 +217,87 @@
         };
         document.head.appendChild(script);
       })();
+    </script>
+
+    <!-- APlayer（自建网易云 API，每日轮换 50 首） -->
+    <script src="https://cdn.jsdelivr.net/npm/aplayer@1.10.1/dist/APlayer.min.js" defer></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        fetch('/api/meting')
+          .then(function(r) { return r.json(); })
+          .then(function(songs) {
+            if (!songs || !songs.length) { console.warn('[Music] 歌单为空'); return; }
+
+            // 按日期哈希，每天轮换 50 首
+            var today = new Date();
+            var dayNum = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+            var start = dayNum % songs.length;
+            var daily = [];
+            for (var i = 0; i < 50 && i < songs.length; i++) {
+              daily.push(songs[(start + i) % songs.length]);
+            }
+
+            var ap = new APlayer({
+              container: document.getElementById('aplayer-container'),
+              autoplay: true,
+              volume: 0.4,
+              order: 'random',
+              loop: 'all',
+              lrcType: 3,
+              listFolded: true,
+              audio: daily.map(function(s) {
+                return {
+                  name: s.name,
+                  artist: s.artist,
+                  url: '/api/music/play/' + s.id,
+                  cover: s.pic || '',
+                  lrc: '/api/lyric?id=' + s.id
+                };
+              })
+            });
+            window.__aplayerInstance = ap;
+            console.log('[Music] 今日 ' + daily.length + ' 首（共 ' + songs.length + ' 首轮换池）');
+
+            // 在封面上添加控件（上一首 / 播放暂停 / 下一首）
+            setTimeout(function() {
+              var pic = document.querySelector('#aplayer-float .aplayer-pic');
+              if (pic && !pic.querySelector('.cover-controls')) {
+                var ctrl = document.createElement('div');
+                ctrl.className = 'cover-controls';
+                ctrl.innerHTML =
+                  '<button title="上一首" onclick="event.stopPropagation();window.__aplayerInstance&&window.__aplayerInstance.skipBack()"><i class="fas fa-backward-step"></i></button>' +
+                  '<button class="play-btn" title="播放/暂停" onclick="event.stopPropagation();window.__aplayerInstance&&window.__aplayerInstance.toggle()"><i class="fas fa-play" id="cover-play-icon"></i></button>' +
+                  '<button title="下一首" onclick="event.stopPropagation();window.__aplayerInstance&&window.__aplayerInstance.skipForward()"><i class="fas fa-forward-step"></i></button>';
+                pic.style.position = 'relative';
+                pic.appendChild(ctrl);
+
+                // 同步播放/暂停图标
+                ap.on('play', function() {
+                  var icon = document.getElementById('cover-play-icon');
+                  if (icon) { icon.className = 'fas fa-pause'; }
+                });
+                ap.on('pause', function() {
+                  var icon = document.getElementById('cover-play-icon');
+                  if (icon) { icon.className = 'fas fa-play'; }
+                });
+              }
+            }, 500);
+
+            // 自动播放
+            var played = false;
+            function tryPlay() { if (played) return; ap.play(); played = true; }
+            setTimeout(tryPlay, 2000);
+            document.addEventListener('click', tryPlay, { once: true });
+            document.addEventListener('touchstart', tryPlay, { once: true });
+          })
+          .catch(function(e) { console.error('[Music] 加载失败:', e); });
+      });
+
+      // 全局切换函数（供 Vue 调用）
+      window.__toggleMusicPlayer = function() {
+        var panel = document.getElementById('aplayer-float');
+        if (panel) panel.classList.toggle('show');
+      };
     </script>
   </body>
 </html>

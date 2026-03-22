@@ -37,8 +37,17 @@
               </div>
             </div>
 
+            <!-- ========== 未登录：扫码登录入口 ========== -->
+            <div v-if="!authStore.isLoggedIn" class="up-login-prompt">
+              <i class="fas fa-qrcode"></i>
+              <p>未授权，请先登录</p>
+              <button class="up-login-btn" @click="showLogin = true">
+                <i class="fas fa-qrcode"></i> 扫码登录
+              </button>
+            </div>
+
             <!-- ========== Tab 切换 ========== -->
-            <div class="up-tabs">
+            <div v-if="authStore.isLoggedIn" class="up-tabs">
               <button :class="['up-tab', { active: tab === 'submissions' }]" @click="switchTab('submissions')">
                 <i class="fas fa-video"></i> 投稿
               </button>
@@ -48,7 +57,20 @@
             </div>
 
             <!-- ========== 投稿列表 ========== -->
-            <div v-if="tab === 'submissions'" class="up-list-area">
+            <div v-if="authStore.isLoggedIn && tab === 'submissions'" class="up-list-area">
+              <!-- 批量操作头部 -->
+              <div class="up-batch-bar">
+                <button class="up-batch-toggle" :class="{ active: batchMode === 'sub' }" @click="toggleBatchMode('sub')">
+                  <i class="fas fa-download"></i> {{ batchMode === 'sub' ? '退出批量' : '批量下载' }}
+                </button>
+                <label v-if="batchMode === 'sub' && subList.length" class="up-select-all" @click.prevent="toggleSelectAll('sub')">
+                  <span :class="['up-checkbox', { checked: isAllSelectedSub }]">
+                    <i v-if="isAllSelectedSub" class="fas fa-check"></i>
+                  </span>
+                  <span>{{ isAllSelectedSub ? '取消全选' : '全选' }}</span>
+                </label>
+              </div>
+
               <div v-if="subLoading && !subList.length" class="up-skeleton-list">
                 <div class="up-skeleton-item" v-for="i in 4" :key="i"></div>
               </div>
@@ -60,7 +82,15 @@
                 <div class="up-empty" v-if="!subList.length">
                   <i class="fas fa-inbox"></i><p>暂无投稿</p>
                 </div>
-                <div v-for="v in subList" :key="v.bvid" class="up-video" @click="parseVideo(v.bvid)">
+                <div
+                  v-for="v in subList" :key="v.bvid"
+                  :class="['up-video', { 'up-video--selected': selectedSub.has(v.bvid) }]"
+                  @click="batchMode === 'sub' ? toggleSelect('sub', v.bvid) : parseVideo(v.bvid)"
+                >
+                  <!-- 批量选择 checkbox -->
+                  <span v-if="batchMode === 'sub'" :class="['up-checkbox', { checked: selectedSub.has(v.bvid) }]">
+                    <i v-if="selectedSub.has(v.bvid)" class="fas fa-check"></i>
+                  </span>
                   <img :src="v.cover" class="up-video__cover" loading="lazy" referrerpolicy="no-referrer" />
                   <div class="up-video__meta">
                     <span class="up-video__title">{{ v.title }}</span>
@@ -77,7 +107,7 @@
             </div>
 
             <!-- ========== 收藏夹列表 ========== -->
-            <div v-if="tab === 'favorites'" class="up-list-area">
+            <div v-if="authStore.isLoggedIn && tab === 'favorites'" class="up-list-area">
               <!-- 收藏夹目录 -->
               <template v-if="!activeFav">
                 <div v-if="favLoading && !favFolders.length" class="up-skeleton-list">
@@ -102,10 +132,24 @@
 
               <!-- 收藏夹内视频 -->
               <template v-else>
-                <div class="up-folder-back" @click="activeFav = null">
+                <div class="up-folder-back" @click="activeFav = null; exitBatchMode()">
                   <i class="fas fa-arrow-left"></i>
                   <span>{{ activeFav.title }}</span>
                 </div>
+
+                <!-- 批量操作头部 -->
+                <div class="up-batch-bar">
+                  <button class="up-batch-toggle" :class="{ active: batchMode === 'fav' }" @click="toggleBatchMode('fav')">
+                    <i class="fas fa-download"></i> {{ batchMode === 'fav' ? '退出批量' : '批量下载' }}
+                  </button>
+                  <label v-if="batchMode === 'fav' && favVideos.length" class="up-select-all" @click.prevent="toggleSelectAll('fav')">
+                    <span :class="['up-checkbox', { checked: isAllSelectedFav }]">
+                      <i v-if="isAllSelectedFav" class="fas fa-check"></i>
+                    </span>
+                    <span>{{ isAllSelectedFav ? '取消全选' : '全选' }}</span>
+                  </label>
+                </div>
+
                 <div v-if="favVidLoading && !favVideos.length" class="up-skeleton-list">
                   <div class="up-skeleton-item" v-for="i in 4" :key="i"></div>
                 </div>
@@ -114,7 +158,14 @@
                   <button @click="loadFolderVideos(activeFav!.id, 1)"><i class="fas fa-redo"></i> 重试</button>
                 </div>
                 <template v-else>
-                  <div v-for="v in favVideos" :key="v.bvid" class="up-video" @click="parseVideo(v.bvid)">
+                  <div
+                    v-for="v in favVideos" :key="v.bvid"
+                    :class="['up-video', { 'up-video--selected': selectedFav.has(v.bvid) }]"
+                    @click="batchMode === 'fav' ? toggleSelect('fav', v.bvid) : parseVideo(v.bvid)"
+                  >
+                    <span v-if="batchMode === 'fav'" :class="['up-checkbox', { checked: selectedFav.has(v.bvid) }]">
+                      <i v-if="selectedFav.has(v.bvid)" class="fas fa-check"></i>
+                    </span>
                     <img :src="v.cover" class="up-video__cover" loading="lazy" referrerpolicy="no-referrer" />
                     <div class="up-video__meta">
                       <span class="up-video__title">{{ v.title }}</span>
@@ -131,21 +182,55 @@
               </template>
             </div>
           </div>
+
+          <!-- ========== 底部浮动操作栏 ========== -->
+          <Transition name="bar-slide">
+            <div v-if="selectedCount > 0" class="up-batch-footer">
+              <span class="up-batch-footer__info">
+                <i class="fas fa-check-square"></i> 已选 {{ selectedCount }} 个
+              </span>
+              <!-- 画质选择 -->
+              <select v-model="batchQn" class="up-batch-footer__qn" title="下载画质">
+                <option v-for="q in QUALITY_OPTIONS" :key="q.qn" :value="q.qn">{{ q.label }}</option>
+              </select>
+              <button class="up-batch-footer__cancel" @click="exitBatchMode">取消</button>
+              <button class="up-batch-footer__start" @click="startBatchDownload" :disabled="batchDownloading">
+                <i :class="batchDownloading ? 'fas fa-spinner fa-spin' : 'fas fa-download'"></i>
+                {{ batchDownloading ? batchProgress : '开始下载' }}
+              </button>
+            </div>
+          </Transition>
         </div>
       </div>
     </Transition>
   </Teleport>
+
+  <!-- 扫码登录弹窗 -->
+  <LoginModal v-model:visible="showLogin" @login-success="onLoginSuccess" />
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, inject } from 'vue'
+import { ref, computed, watch, inject, reactive } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useVideoStore } from '@/stores/video'
+import { useAppStore } from '@/stores/app'
 import * as authApi from '@/services/auth'
+import { buildStreamUrl } from '@/services/bilibili'
+import { downloadAndMerge, type MergeProgress } from '@/services/ffmpegMerge'
+import LoginModal from '@/components/common/LoginModal.vue'
 
 const authStore = useAuthStore()
 const videoStore = useVideoStore()
+const appStore = useAppStore()
 const toast = inject<(m: string, t: string) => void>('toast')
+
+// 扫码登录弹窗
+const showLogin = ref(false)
+function onLoginSuccess() {
+  showLogin.value = false
+  toast?.('登录成功 🎉', 'success')
+  loadSubmissions(1)
+}
 
 // --- Tab ---
 const tab = ref<'submissions' | 'favorites'>('submissions')
@@ -170,6 +255,138 @@ const favVidPage = ref(1)
 const favVidLoading = ref(false)
 const favVidError = ref('')
 
+// ==================== 批量下载 ====================
+const batchMode = ref<'sub' | 'fav' | null>(null)
+const selectedSub = reactive(new Set<string>())
+const selectedFav = reactive(new Set<string>())
+const batchDownloading = ref(false)
+const batchProgress = ref('提交中...')
+
+// 画质选项
+const QUALITY_OPTIONS = [
+  { qn: 120, label: '4K' },
+  { qn: 116, label: '1080P60' },
+  { qn: 80,  label: '1080P' },
+  { qn: 64,  label: '720P' },
+  { qn: 32,  label: '480P' },
+  { qn: 16,  label: '360P' },
+]
+const batchQn = ref(appStore.quality || 80)
+
+const selectedCount = computed(() => {
+  if (batchMode.value === 'sub') return selectedSub.size
+  if (batchMode.value === 'fav') return selectedFav.size
+  return 0
+})
+
+const isAllSelectedSub = computed(() =>
+  subList.value.length > 0 && selectedSub.size === subList.value.length
+)
+
+const isAllSelectedFav = computed(() =>
+  favVideos.value.length > 0 && selectedFav.size === favVideos.value.length
+)
+
+function toggleBatchMode(type: 'sub' | 'fav') {
+  if (batchMode.value === type) {
+    exitBatchMode()
+  } else {
+    batchMode.value = type
+    selectedSub.clear()
+    selectedFav.clear()
+  }
+}
+
+function exitBatchMode() {
+  batchMode.value = null
+  selectedSub.clear()
+  selectedFav.clear()
+}
+
+function toggleSelect(type: 'sub' | 'fav', bvid: string) {
+  const set = type === 'sub' ? selectedSub : selectedFav
+  if (set.has(bvid)) set.delete(bvid)
+  else set.add(bvid)
+}
+
+function toggleSelectAll(type: 'sub' | 'fav') {
+  if (type === 'sub') {
+    if (isAllSelectedSub.value) {
+      selectedSub.clear()
+    } else {
+      subList.value.forEach(v => selectedSub.add(v.bvid))
+    }
+  } else {
+    if (isAllSelectedFav.value) {
+      selectedFav.clear()
+    } else {
+      favVideos.value.forEach(v => selectedFav.add(v.bvid))
+    }
+  }
+}
+
+function sanitize(s: string) { return s.replace(/[<>:"/\\|?*]/g, '_') }
+
+async function startBatchDownload() {
+  const type = batchMode.value
+  if (!type) return
+
+  const selected = type === 'sub' ? [...selectedSub] : [...selectedFav]
+  const videoList = type === 'sub' ? subList.value : favVideos.value
+
+  if (!selected.length) {
+    toast?.('请先选择要下载的视频', 'error')
+    return
+  }
+
+  batchDownloading.value = true
+  const total = selected.length
+  const qn = batchQn.value
+  toast?.(`开始批量下载 ${total} 个视频 (${QUALITY_OPTIONS.find(q => q.qn === qn)?.label || qn})...`, 'success')
+
+  let successCount = 0
+  let failCount = 0
+
+  for (let i = 0; i < total; i++) {
+    const bvid = selected[i]
+    const video = videoList.find((v: any) => v.bvid === bvid)
+    const title = sanitize(video?.title || bvid)
+    const url = `https://www.bilibili.com/video/${bvid}`
+    const fname = `${title}.mp4`
+
+    batchProgress.value = `(${i + 1}/${total}) 处理中...`
+
+    try {
+      // 构建流式代理 URL（服务器只转发，不存盘）
+      const videoStreamUrl = buildStreamUrl(url, 'video', qn)
+      const audioStreamUrl = buildStreamUrl(url, 'audio', qn)
+
+      // 浏览器端下载+合并（FFmpeg.wasm）
+      await downloadAndMerge(videoStreamUrl, audioStreamUrl, fname, (progress: MergeProgress) => {
+        batchProgress.value = `(${i + 1}/${total}) ${progress.message}`
+      })
+
+      successCount++
+      toast?.(`✅ ${title} 下载完成`, 'success')
+    } catch (e: any) {
+      failCount++
+      console.warn(`[批量下载] ${title} 失败:`, e.message)
+      toast?.(`❌ ${title} 下载失败: ${e.message}`, 'error')
+    }
+
+    // 任务间延迟
+    if (i < total - 1) {
+      await new Promise(r => setTimeout(r, 300))
+    }
+  }
+
+  batchDownloading.value = false
+  batchProgress.value = '提交中...'
+  exitBatchMode()
+  toast?.(`批量下载完成：成功 ${successCount}，失败 ${failCount}`, successCount > 0 ? 'success' : 'error')
+}
+
+// ==================== 原有逻辑 ====================
 const expPct = computed(() => {
   const d = authStore.userDetail
   if (!d || !d.nextLevelExp) return 0
@@ -181,6 +398,7 @@ function fmt(n: number) { return Math.floor(n).toLocaleString('zh-CN') }
 // 切换 tab
 function switchTab(t: 'submissions' | 'favorites') {
   tab.value = t
+  exitBatchMode()
   if (t === 'submissions' && !subList.value.length) loadSubmissions(1)
   if (t === 'favorites' && !favFolders.value.length) loadFavorites()
 }
@@ -219,6 +437,7 @@ async function loadFavorites() {
 function openFolder(f: { id: number; title: string }) {
   activeFav.value = f
   favVideos.value = []
+  exitBatchMode()
   loadFolderVideos(f.id, 1)
 }
 
@@ -250,9 +469,10 @@ function parseVideo(bvid: string) {
 
 // 面板打开时自动加载
 watch(() => authStore.profilePanelOpen, (open) => {
-  if (open && !subList.value.length) {
+  if (open && authStore.isLoggedIn && !subList.value.length) {
     loadSubmissions(1)
   }
+  if (!open) exitBatchMode()
 })
 </script>
 
@@ -272,6 +492,7 @@ watch(() => authStore.profilePanelOpen, (open) => {
   @include glass-elevated;
   display: flex; flex-direction: column;
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
+  position: relative;
 }
 
 .up-head {
@@ -291,6 +512,7 @@ watch(() => authStore.profilePanelOpen, (open) => {
 .up-body {
   flex: 1; overflow-y: auto;
   padding: var(--spacing-sm) var(--spacing-md);
+  padding-bottom: 72px; // 底部操作栏留空
   display: flex; flex-direction: column; gap: var(--spacing-sm);
 }
 
@@ -373,6 +595,90 @@ watch(() => authStore.profilePanelOpen, (open) => {
   &.active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
 }
 
+// ==================== 批量操作头部 ====================
+.up-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 4px;
+  gap: 8px;
+}
+
+.up-batch-toggle {
+  @include btn-reset;
+  padding: 5px 14px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-input);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+
+  &:hover {
+    color: var(--color-primary);
+    border-color: rgba(251, 114, 153, 0.3);
+    background: rgba(251, 114, 153, 0.08);
+  }
+
+  &.active {
+    color: #fff;
+    background: linear-gradient(135deg, #FB7299, #00A1D6);
+    border-color: transparent;
+  }
+}
+
+.up-select-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s;
+
+  &:hover {
+    color: var(--color-text-primary);
+    background: var(--color-bg-hover);
+  }
+}
+
+// ==================== 自定义 Checkbox ====================
+.up-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.04);
+  flex-shrink: 0;
+  transition: all 0.2s;
+
+  i {
+    font-size: 10px;
+    color: white;
+    transform: scale(0);
+    transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  &.checked {
+    background: linear-gradient(135deg, #FB7299, #00A1D6);
+    border-color: transparent;
+    box-shadow: 0 2px 8px rgba(251, 114, 153, 0.3);
+
+    i {
+      transform: scale(1);
+    }
+  }
+}
+
 // ---- 视频列表 ----
 .up-list-area {
   display: flex; flex-direction: column; gap: var(--spacing-xs);
@@ -382,8 +688,16 @@ watch(() => authStore.profilePanelOpen, (open) => {
 .up-video {
   display: flex; gap: var(--spacing-sm); padding: var(--spacing-xs);
   border-radius: var(--radius-sm); cursor: pointer;
-  transition: background var(--transition-fast);
+  transition: all 0.2s;
+  align-items: center;
+  border: 1px solid transparent;
+
   &:hover { background: var(--color-bg-hover); }
+
+  &--selected {
+    background: rgba(251, 114, 153, 0.08) !important;
+    border-color: rgba(251, 114, 153, 0.2);
+  }
 
   &__cover {
     width: 100px; height: 60px; border-radius: var(--radius-sm);
@@ -436,6 +750,27 @@ watch(() => authStore.profilePanelOpen, (open) => {
   &:disabled { color: var(--color-text-placeholder); }
 }
 
+// ---- 未登录入口 ----
+.up-login-prompt {
+  display: flex; flex-direction: column; align-items: center; gap: var(--spacing-md);
+  padding: var(--spacing-2xl) var(--spacing-lg);
+  color: var(--color-text-secondary);
+  > i { font-size: 2.5rem; opacity: 0.4; color: var(--color-primary); }
+  p { font-size: var(--font-size-sm); }
+}
+
+.up-login-btn {
+  @include btn-reset;
+  padding: 10px 28px; border-radius: var(--radius-full);
+  background: linear-gradient(135deg, #FB7299, #FF9B8B);
+  color: white; font-size: var(--font-size-sm); font-weight: var(--font-weight-bold);
+  display: flex; align-items: center; gap: 6px;
+  box-shadow: 0 4px 12px rgba(251, 114, 153, 0.35);
+  transition: all 0.2s;
+  &:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  &:active { transform: translateY(0); }
+}
+
 // ---- 空 / 错误 ----
 .up-empty {
   display: flex; flex-direction: column; align-items: center; gap: var(--spacing-sm);
@@ -461,7 +796,125 @@ watch(() => authStore.profilePanelOpen, (open) => {
   background: var(--color-bg-hover); animation: pulse 1.5s ease-in-out infinite;
 }
 
-// ---- Transition ----
+// ==================== 底部浮动操作栏 ====================
+.up-batch-footer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(15, 17, 22, 0.88);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 10;
+
+  &__info {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    i { font-size: 14px; }
+  }
+
+  &__qn {
+    appearance: none;
+    -webkit-appearance: none;
+    padding: 5px 24px 5px 10px;
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    background: var(--color-bg-input) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23999' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E") no-repeat right 8px center;
+    border: 1px solid var(--color-border);
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 70px;
+
+    &:hover {
+      border-color: rgba(251, 114, 153, 0.4);
+    }
+
+    &:focus {
+      outline: none;
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 2px rgba(251, 114, 153, 0.15);
+    }
+
+    option {
+      background: var(--color-bg-primary);
+      color: var(--color-text-primary);
+    }
+  }
+
+  &__cancel {
+    @include btn-reset;
+    padding: 7px 16px;
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border);
+    transition: all 0.2s;
+
+    &:hover {
+      color: var(--color-text-primary);
+      background: var(--color-bg-hover);
+    }
+  }
+
+  &__start {
+    @include btn-reset;
+    padding: 7px 20px;
+    border-radius: var(--radius-full);
+    font-size: 12px;
+    font-weight: 700;
+    color: white;
+    background: linear-gradient(135deg, #FB7299, #00A1D6);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 4px 12px rgba(251, 114, 153, 0.3);
+    transition: all 0.2s;
+
+    &:hover:not(:disabled) {
+      filter: brightness(1.1);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(251, 114, 153, 0.4);
+    }
+
+    &:active:not(:disabled) { transform: translateY(0); }
+
+    &:disabled {
+      opacity: 0.7;
+      cursor: not-allowed;
+    }
+  }
+}
+
+// 操作栏入场动画
+.bar-slide-enter-active {
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.bar-slide-leave-active {
+  transition: all 0.2s ease;
+}
+.bar-slide-enter-from {
+  transform: translateY(100%);
+  opacity: 0;
+}
+.bar-slide-leave-to {
+  transform: translateY(100%);
+  opacity: 0;
+}
+
+// ---- Panel Transition ----
 .panel-enter-active { transition: all 0.3s var(--ease-out); }
 .panel-leave-active { transition: all 0.2s ease; }
 .panel-enter-from, .panel-leave-to { opacity: 0; .up-panel { transform: translateX(100%); } }

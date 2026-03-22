@@ -180,8 +180,12 @@ textarea {
     pointer-events: auto !important;
   }
 
-  // 对话气泡 - 红蓝配色
+  // 对话气泡 - 红蓝配色（z-index 高于音乐播放器 250）
+  // 强制覆盖第三方 waifu-tips.js 的隐藏行为
   #waifu-tips {
+    z-index: 300 !important;
+    display: block !important;
+    visibility: visible !important;
     pointer-events: none;
     background: linear-gradient(135deg, #FB7299 0%, #4A90D9 100%) !important;
     color: #fff !important;
@@ -192,5 +196,7 @@ textarea {
     line-height: 1.5 !important;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
     box-shadow: 0 2px 12px rgba(251, 114, 153, 0.3);
+    // 用 opacity 控制显隐而非 display
+    transition: opacity 0.3s !important;
   }
 }

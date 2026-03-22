@@ -1,202 +1,296 @@
 /**
- * useMascot — 智能看板娘状态管理 (Phase 1 + 3)
- * 监听 Pinia stores 变化 → 自动触发气泡台词
- * 闲置超时 → 主动互动
+ * useMascot — 看板娘智能状态管理
+ * - 预设互动：根据用户操作行为触发看板娘对话
+ * - 登录 → 拉行为数据 → AI 分析画像
+ * - 解析视频 → 字幕+联网双通道 → AI 总结
  */
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { watch, onMounted, onUnmounted } from 'vue'
 import { useVideoStore } from '@/stores/video'
 import { useDownloadStore } from '@/stores/download'
 import { useAuthStore } from '@/stores/auth'
 
-// 气泡消息队列
-export interface BubbleMsg {
-  text: string
-  duration?: number
-  type?: 'info' | 'success' | 'error' | 'chat'
+function callAI(context: string, msg: string) {
+  const fn = (window as any).__waifuCallAI
+  if (typeof fn === 'function') return fn(context, msg)
 }
 
-// 全局状态
-const bubbleQueue = ref<BubbleMsg[]>([])
-const currentBubble = ref<BubbleMsg | null>(null)
-const chatOpen = ref(false)
-export const userContext = ref('空闲中')
+function showTips(text: string, duration = 6000) {
+  const fn = (window as any).__waifuShowTips
+  if (typeof fn === 'function') fn(text, duration)
+}
 
-// 冷却防刷
-let lastBubbleTime = 0
-const COOLDOWN = 3000
+function setContext(ctx: string) {
+  ;(window as any).__waifuUserContext = ctx
+}
 
-// 闲置计时
-let idleTimer: ReturnType<typeof setTimeout> | null = null
-const IDLE_TIMEOUT = 60_000 // 60 秒
+function getCurrentModelId(): number {
+  try { return parseInt(localStorage.getItem('modelId') || '1') } catch { return 1 }
+}
 
-// ---- 预设台词 ----
-const WELCOME_LINES = [
-  '欢迎回来~今天想下载什么视频呀？(◕ᴗ◕✿)',
-  '嗨嗨~有什么我能帮你的吗？✨',
-  '又来啦~让我看看有什么好视频！🎬',
-]
+function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] }
 
-const IDLE_LINES = [
-  '主人好久没动了，要不要找个有趣的视频看看？🤔',
-  '无聊的话可以点我聊天哦~ (●\'◡\'●)',
-  '好安静啊…要不去B站逛逛？',
-  '摸鱼时间到！🐟',
-  '我在这里等你呢，随时可以找我聊天~',
-]
+// ==================== 预设互动台词 ====================
+const PRESET = {
+  // 页面加载/首次访问
+  welcome: [
+    '欢迎来到视频下载站~有什么需要帮忙的吗？✨',
+    '嗨~今天想下载什么好视频呀？(◕ᴗ◕✿)',
+    '你来啦~快把视频链接丢给我吧！🎬',
+  ],
+  // 解析成功
+  parseSuccess: [
+    '解析成功啦！快看看视频信息~ 📹',
+    '搞定！视频信息出来了哦 ✨',
+    '完美解析！让 AI 帮你看看视频讲了什么~',
+  ],
+  // 解析失败
+  parseFail: [
+    '呜…解析失败了，链接是不是不对呀？😢',
+    '出错了呢…要不换个链接试试？🤔',
+    '解析出问题了，检查一下链接格式吧~',
+  ],
+  // 开始下载
+  downloadStart: [
+    '开始下载啦，稍等一下哦~ ⏳',
+    '下载中…我帮你盯着进度！📥',
+    '正在下载~喝杯水等一会儿吧 ☕',
+  ],
+  // 下载完成
+  downloadDone: [
+    '下载完成啦！快去看看吧~ 🎉',
+    '搞定！视频已经下好了 (ﾉ◕ヮ◕)ﾉ*:・ﾟ✧',
+    '下载好了~享受观看吧！🎬',
+  ],
+  // 用户登出
+  logout: [
+    '下次再见哦~ (｡•́ωก̀｡)',
+    '拜拜~欢迎下次再来！👋',
+  ],
+  // 闲置
+  idle: [
+    '好久没动了，要不要找个有趣的视频看看？🤔',
+    '无聊的话可以跟我聊天哦~ (●\'◡\'●)',
+    '好安静啊…要不去B站逛逛？',
+    '摸鱼时间到！🐟',
+    '发呆中…你也在发呆吗？😴',
+  ],
+  // 用户粘贴链接（输入框聚焦时）
+  inputFocus: [
+    '把链接粘贴过来就好啦~',
+    '我准备好了，快输入链接吧！✌️',
+  ],
+  // 批量解析
+  batchParse: [
+    '哇~一次解析这么多，真有效率！💪',
+    '批量任务收到！让我帮你一个个搞定~',
+  ],
+  // 用户切换画质
+  qualityChange: [
+    '画质越高越香哦~当然也越大 😜',
+    '高画质爱好者！存储空间还够吗？💾',
+  ],
+}
 
-const PARSE_SUCCESS = [
-  '解析成功啦！快看看视频信息~📹',
-  '搞定！点下载就可以保存了哦✨',
-  '诶嘿嘿，解析好啦(≧▽≦)',
-]
+// ==================== 行为数据拉取 ====================
+async function fetchProfileAnalysis(): Promise<string> {
+  try {
+    const resp = await fetch('/api/user/profile-analysis')
+    const data = await resp.json()
+    return data.success ? (data.summary || '') : ''
+  } catch { return '' }
+}
 
-const PARSE_FAIL = [
-  '啊…解析失败了，要不换个链接试试？😢',
-  '出错了呢…检查一下链接是不是对的？',
-]
+async function fetchSubtitle(bvid: string, cid: number): Promise<string> {
+  try {
+    const resp = await fetch(`/api/video/subtitle?bvid=${bvid}&cid=${cid}`)
+    const data = await resp.json()
+    return data.text || ''
+  } catch { return '' }
+}
 
-const DOWNLOAD_START = [
-  '开始下载啦，稍等一下哦~⏳',
-  '下载中…我帮你盯着进度！📥',
-]
+// ==================== 联网视频分析 ====================
+async function analyzeVideo(videoUrl: string, title: string, subtitle?: string) {
+  const startThink = (window as any).__waifuStartThinking
+  const stopThink = (window as any).__waifuStopThinking
+  if (startThink) startThink()
 
-const DOWNLOAD_DONE = [
-  '下载完成啦！快去看看吧~ 🎉',
-  '搞定！视频已经下好了(ﾉ◕ヮ◕)ﾉ*:・ﾟ✧',
-]
+  try {
+    // 如果有字幕就一起发给后端，让 AI 结合联网+字幕分析
+    const body: any = { videoUrl, title, character: getCurrentModelId() }
+    if (subtitle) body.subtitle = subtitle
 
-const LOGIN_SUCCESS = [
-  '登录成功！现在可以下载高清视频了~🎊',
-  '欢迎大会员！享受 4K 极致体验吧✨',
-]
+    const resp = await fetch('/api/chat/video', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
 
-const LOGOUT = [
-  '下次再见哦~ (｡•́ωก̀｡)',
-]
+    if (!resp.ok || !resp.body) { showTips('视频分析失败了…😥'); return }
 
-function pick(arr: string[]) { return arr[Math.floor(Math.random() * arr.length)] }
+    const reader = resp.body.getReader()
+    const decoder = new TextDecoder()
+    let fullReply = ''
+    let buffer = ''
 
-// ---- 核心方法 ----
-export function showBubble(msg: BubbleMsg) {
-  const now = Date.now()
-  if (now - lastBubbleTime < COOLDOWN && msg.type !== 'chat') return
-  lastBubbleTime = now
-  currentBubble.value = msg
-
-  const duration = msg.duration || 5000
-
-  // 优先用原库 showMessage
-  const win = window as any
-  if (typeof win.showMessage === 'function') {
-    win.showMessage(msg.text, duration, 10)
-  } else {
-    // 回退：直接操作 #waifu-tips DOM
-    const tips = document.getElementById('waifu-tips')
-    if (tips) {
-      tips.textContent = msg.text
-      tips.style.opacity = '1'
-      tips.style.transition = 'opacity 0.3s'
-      setTimeout(() => {
-        // 移除内联样式，让原库 CSS 重新接管
-        tips.style.removeProperty('opacity')
-        tips.style.removeProperty('transition')
-      }, duration)
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const data = JSON.parse(line.slice(6))
+          if (data.done) break
+          if (data.content) {
+            fullReply += data.content
+            const t = fullReply.length > 150 ? fullReply.slice(0, 150) + '…' : fullReply
+            showTips(t, 15000)
+          }
+        } catch { /* skip */ }
+      }
     }
-  }
-
-  setTimeout(() => {
-    if (currentBubble.value === msg) currentBubble.value = null
-  }, duration)
+    if (fullReply) {
+      showTips(fullReply.length > 150 ? fullReply.slice(0, 150) + '…' : fullReply, 10000)
+    }
+  } catch { showTips('网络出问题了…😥') }
+  finally { if (stopThink) stopThink() }
 }
 
-export function toggleChat() {
-  chatOpen.value = !chatOpen.value
+// ==================== 冷却控制 ====================
+let lastPresetTime = 0
+const PRESET_COOLDOWN = 4000
+
+function showPreset(lines: string[], duration = 6000) {
+  const now = Date.now()
+  if (now - lastPresetTime < PRESET_COOLDOWN) return
+  lastPresetTime = now
+  showTips(pick(lines), duration)
 }
 
-export function setContext(ctx: string) {
-  userContext.value = ctx
-}
-
-function resetIdleTimer() {
-  if (idleTimer) clearTimeout(idleTimer)
-  idleTimer = setTimeout(() => {
-    showBubble({ text: pick(IDLE_LINES), type: 'info', duration: 8000 })
-    resetIdleTimer() // 循环
-  }, IDLE_TIMEOUT)
-}
-
-// ---- Composable ----
+// ==================== Composable ====================
 export function useMascot() {
   onMounted(() => {
     const videoStore = useVideoStore()
     const downloadStore = useDownloadStore()
     const authStore = useAuthStore()
 
-    // 欢迎语（延迟 2 秒）
-    setTimeout(() => showBubble({ text: pick(WELCOME_LINES), type: 'info', duration: 6000 }), 2000)
+    // ---- 欢迎语（延迟 3 秒）----
+    setTimeout(() => showPreset(PRESET.welcome, 6000), 3000)
 
-    // 监听解析结果（属性名是 currentResult，不是 currentVideo）
-    watch(() => videoStore.currentResult, (v, old) => {
-      if (v && v !== old) {
-        setContext(`正在查看视频：${v.title}`)
-        showBubble({ text: pick(PARSE_SUCCESS), type: 'success' })
+    // ---- 登录 → AI 分析用户画像 ----
+    watch(() => authStore.isLoggedIn, async (loggedIn, was) => {
+      if (loggedIn && !was) {
+        setContext('用户刚刚登录')
+        setTimeout(async () => {
+          if (!authStore.userDetail) {
+            try { await authStore.fetchUserDetail() } catch { /* ignore */ }
+          }
+          const info = authStore.userInfo
+          const detail = authStore.userDetail
+          const isVip = authStore.isVip
+          const vipLabel = authStore.vipLabel
+          const behaviorSummary = await fetchProfileAnalysis()
+
+          let userDesc = `用户「${info?.name || '未知'}」刚刚登录了。\n`
+          if (detail) userDesc += `基础信息：Lv${detail.level}，硬币${detail.coins}，获赞${detail.totalLikes}。\n`
+          if (isVip) userDesc += `会员状态：${vipLabel || '大会员'}。\n`
+          if (behaviorSummary) userDesc += `\n用户行为数据：\n${behaviorSummary}`
+
+          callAI(
+            '用户刚登录B站账号。请根据全部信息（等级、获赞、会员、观看历史分区、收藏视频）综合分析该用户的类型、兴趣偏好、活跃程度。用可爱语气评价，3-4句话。',
+            userDesc
+          )
+        }, 2000)
+      }
+      if (!loggedIn && was) {
+        setContext('空闲中')
+        showPreset(PRESET.logout)
       }
     })
 
-    // 监听解析错误
+    // ---- 解析视频 → 字幕+联网分析 ----
+    watch(() => videoStore.currentResult, async (result, old) => {
+      if (result && result !== old) {
+        setContext(`正在查看视频：${result.title}`)
+        showPreset(PRESET.parseSuccess)
+
+        // 先拉字幕，再联网分析（字幕辅助）
+        let subtitle = ''
+        if (result.bvid && result.cid) {
+          subtitle = await fetchSubtitle(result.bvid, result.cid)
+        }
+        const videoUrl = result.bvid
+          ? `https://www.bilibili.com/video/${result.bvid}`
+          : (result.url || '')
+        if (videoUrl) {
+          analyzeVideo(videoUrl, result.title, subtitle || undefined)
+        }
+      }
+    })
+
+    // ---- 解析失败 ----
     watch(() => videoStore.error, (err) => {
       if (err) {
         setContext('解析失败')
-        showBubble({ text: pick(PARSE_FAIL), type: 'error' })
+        showPreset(PRESET.parseFail)
       }
     })
 
-    // 监听下载任务创建（tasks 是 Map，用 .size）
-    watch(() => downloadStore.tasks.size, (newSize, oldSize) => {
-      if (newSize > oldSize) {
+    // ---- 下载开始 ----
+    watch(() => downloadStore.tasks.size, (n, o) => {
+      if (n > o) {
         setContext('正在下载视频')
-        showBubble({ text: pick(DOWNLOAD_START), type: 'info' })
+        showPreset(PRESET.downloadStart)
       }
     })
 
-    // 监听下载完成（用 getter taskList）
-    watch(() => downloadStore.completedCount, (n: number, old: number) => {
-      if (n > old) {
-        showBubble({ text: pick(DOWNLOAD_DONE), type: 'success' })
+    // ---- 下载完成 ----
+    watch(() => downloadStore.completedCount, (n: number, o: number) => {
+      if (n > o) {
+        setContext('下载完成')
+        showPreset(PRESET.downloadDone)
       }
     })
 
-    // 监听登录
-    watch(() => authStore.isLoggedIn, (loggedIn, was) => {
-      if (loggedIn && !was) {
-        setContext('用户已登录')
-        showBubble({ text: pick(LOGIN_SUCCESS), type: 'success', duration: 6000 })
-      }
-      if (!loggedIn && was) {
-        showBubble({ text: pick(LOGOUT), type: 'info' })
+    // ---- 批量解析触发 ----
+    watch(() => videoStore.batchResults, (results, old) => {
+      if (results && results.length > 0 && results !== old) {
+        showPreset(PRESET.batchParse)
       }
     })
 
-    // 闲置检测
+    // ---- 搜索框聚焦互动 ----
+    const onFocusIn = (e: FocusEvent) => {
+      const target = e.target as HTMLElement
+      if (target?.id === 'search-input' || target?.classList?.contains('search-input')) {
+        showPreset(PRESET.inputFocus)
+      }
+    }
+    document.addEventListener('focusin', onFocusIn)
+
+    // ---- 闲置检测 ----
+    let idleTimer: ReturnType<typeof setTimeout> | null = null
+    function resetIdleTimer() {
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => {
+        setContext('空闲中')
+        showPreset(PRESET.idle, 8000)
+        resetIdleTimer()
+      }, 90_000) // 90秒
+    }
     resetIdleTimer()
     const events = ['mousemove', 'keydown', 'click', 'scroll']
-    const onActivity = () => {
-      resetIdleTimer()
-      if (userContext.value === '空闲中') return
-    }
+    const onActivity = () => resetIdleTimer()
     events.forEach(e => document.addEventListener(e, onActivity, { passive: true }))
 
     onUnmounted(() => {
       events.forEach(e => document.removeEventListener(e, onActivity))
+      document.removeEventListener('focusin', onFocusIn)
       if (idleTimer) clearTimeout(idleTimer)
     })
   })
 
-  return {
-    currentBubble,
-    chatOpen,
-    userContext,
-    showBubble,
-    toggleChat,
-  }
+  return {}
 }

@@ -4,6 +4,7 @@
     <a class="result__thumb" :href="biliUrl" target="_blank" rel="noopener" :title="'在 B 站观看：' + data.title">
       <img :src="coverSrc" :alt="data.title" loading="lazy" referrerpolicy="no-referrer" />
       <span v-if="durationText" class="result__duration">{{ durationText }}</span>
+      <span v-if="maxQualityLabel" class="result__quality">{{ maxQualityLabel }}</span>
       <span class="result__play-hint"><i class="fas fa-external-link-alt"></i></span>
     </a>
 
@@ -25,7 +26,7 @@
         <div class="stat" v-if="data.coins != null"><i class="fas fa-coins"></i><span>{{ fmt(data.coins) }}</span></div>
         <div class="stat" v-if="data.favorites != null"><i class="fas fa-star"></i><span>{{ fmt(data.favorites) }}</span></div>
         <div class="stat" v-if="data.shares != null"><i class="fas fa-share"></i><span>{{ fmt(data.shares) }}</span></div>
-        <div class="stat" v-if="data.danmakus != null"><i class="fas fa-comment-dots"></i><span>{{ fmt(data.danmakus) }}</span></div>
+        <div class="stat" v-if="data.danmakus != null"><i class="fas fa-bars-staggered"></i><span>{{ fmt(data.danmakus) }}</span></div>
         <div class="stat" v-if="data.replies != null"><i class="fas fa-comment"></i><span>{{ fmt(data.replies) }}</span></div>
       </div>
 
@@ -92,6 +93,13 @@ const pubdateText = computed(() => {
   if (!props.data.pubdate) return ''
   const d = new Date(props.data.pubdate * 1000)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})
+
+// 最高画质标签
+const maxQualityLabel = computed(() => {
+  const qn = props.data.maxQuality
+  if (!qn) return ''
+  return QUALITY_MAP[qn] || ''
 })
 
 // 数字格式化
@@ -208,6 +216,19 @@ function downloadDanmaku() {
     font-size: 12px;
     opacity: 0;
     transition: opacity 0.2s;
+  }
+
+  &__quality {
+    position: absolute;
+    top: 8px; left: 8px;
+    background: linear-gradient(135deg, var(--color-blue, #00A1D6), #0090BF);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: var(--font-weight-bold);
+    letter-spacing: 0.3px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
   }
 
   // ---- 信息区 ----

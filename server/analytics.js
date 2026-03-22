@@ -3,6 +3,7 @@
  * 数据分析模块 - 访问日志 & 下载追踪
  * ============================================================
  * 按天存储到 server/logs/YYYY-MM-DD.json
+ * 支持多时间范围聚合查询
  */
 
 const fs = require('fs')
@@ -10,34 +11,25 @@ const path = require('path')
 
 const LOGS_DIR = path.join(__dirname, 'logs')
 
-// 确保日志目录存在
 if (!fs.existsSync(LOGS_DIR)) {
   fs.mkdirSync(LOGS_DIR, { recursive: true })
 }
 
-/** 获取今天的日期字符串 YYYY-MM-DD */
-function today() {
-  return new Date().toISOString().slice(0, 10)
-}
+function today() { return new Date().toISOString().slice(0, 10) }
 
-/** 读取某天的日志 */
 function readDayLog(date) {
   const file = path.join(LOGS_DIR, `${date}.json`)
   try {
-    if (fs.existsSync(file)) {
-      return JSON.parse(fs.readFileSync(file, 'utf-8'))
-    }
+    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf-8'))
   } catch (e) { console.error('[Analytics] read error:', e.message) }
   return { visits: [], downloads: [], uniqueIPs: [], pageViews: 0 }
 }
 
-/** 写入某天的日志 */
 function writeDayLog(date, data) {
   const file = path.join(LOGS_DIR, `${date}.json`)
   fs.writeFileSync(file, JSON.stringify(data, null, 2), 'utf-8')
 }
 
-/** 从请求中提取真实 IP */
 function getClientIP(req) {
   return req.headers['x-forwarded-for']?.split(',')[0]?.trim()
     || req.headers['x-real-ip']
@@ -46,23 +38,19 @@ function getClientIP(req) {
     || 'unknown'
 }
 
-/** 解析 User-Agent 为简短设备描述 */
 function parseDevice(ua) {
   if (!ua) return '未知'
-  // 移动端
   if (/iPhone/i.test(ua)) return 'iPhone'
   if (/iPad/i.test(ua)) return 'iPad'
   if (/Android/i.test(ua)) {
     const m = ua.match(/Android\s[\d.]+;\s*([^)]+?)(?:\s+Build)?/i)
     return m ? m[1].trim().slice(0, 20) : 'Android'
   }
-  // PC 浏览器
   let browser = '未知浏览器'
   if (/Edg\//i.test(ua)) browser = 'Edge'
   else if (/Chrome\//i.test(ua)) browser = 'Chrome'
   else if (/Firefox\//i.test(ua)) browser = 'Firefox'
   else if (/Safari\//i.test(ua)) browser = 'Safari'
-  // 操作系统
   let os = ''
   if (/Windows/i.test(ua)) os = 'Windows'
   else if (/Mac OS/i.test(ua)) os = 'macOS'
@@ -70,19 +58,9 @@ function parseDevice(ua) {
   return os ? `${browser}/${os}` : browser
 }
 
-/**
- * Express 中间件：记录每个页面访问
- * 只记录非静态资源、非 API 轮询的请求
- */
 function accessLogger(loginSessions) {
   return (req, res, next) => {
-    // 跳过静态资源和高频轮询
-    const skip = [
-      '/api/bilibili/qrcode/check',
-      '/api/health',
-      '/api/announcement',
-      '/favicon.ico',
-    ]
+    const skip = ['/api/bilibili/qrcode/check', '/api/health', '/api/announcement', '/favicon.ico']
     if (skip.some(p => req.path.startsWith(p))) return next()
     if (req.path.match(/\.(js|css|png|jpg|svg|woff|ico|map)$/)) return next()
 
@@ -92,28 +70,18 @@ function accessLogger(loginSessions) {
     const date = today()
     const log = readDayLog(date)
 
-    // 记录访问
     log.visits.push({
       time: new Date().toISOString(),
-      ip,
-      path: req.path,
-      method: req.method,
-      device,
+      ip, path: req.path, method: req.method, device,
       user: getUserFromReq(req, loginSessions),
     })
-
-    // 更新计数
     log.pageViews = (log.pageViews || 0) + 1
-    if (!log.uniqueIPs.includes(ip)) {
-      log.uniqueIPs.push(ip)
-    }
-
+    if (!log.uniqueIPs.includes(ip)) log.uniqueIPs.push(ip)
     writeDayLog(date, log)
     next()
   }
 }
 
-/** 从请求中获取用户名 */
 function getUserFromReq(req, loginSessions) {
   const sessionId = req.cookies?.bili_session
   if (sessionId && loginSessions.has(sessionId)) {
@@ -123,18 +91,13 @@ function getUserFromReq(req, loginSessions) {
   return '游客'
 }
 
-/**
- * 记录下载/解析行为
- */
 function logDownload(req, videoInfo, loginSessions) {
   const date = today()
   const log = readDayLog(date)
   const ip = getClientIP(req)
-
   log.downloads.push({
     time: new Date().toISOString(),
-    ip,
-    device: parseDevice(req.headers['user-agent'] || ''),
+    ip, device: parseDevice(req.headers['user-agent'] || ''),
     user: getUserFromReq(req, loginSessions),
     video: {
       title: videoInfo.title || '未知',
@@ -143,77 +106,145 @@ function logDownload(req, videoInfo, loginSessions) {
       url: videoInfo.url || '',
     },
   })
-
   writeDayLog(date, log)
 }
 
-/**
- * 获取看板统计数据
- */
-function getStats(date, password) {
-  const log = readDayLog(date || today())
+/** 获取日期范围内所有日期字符串 YYYY-MM-DD */
+function getDateRange(days) {
+  const dates = []
+  const now = new Date()
+  for (let i = 0; i < days; i++) {
+    const d = new Date(now)
+    d.setDate(d.getDate() - i)
+    dates.push(d.toISOString().slice(0, 10))
+  }
+  return dates
+}
 
-  // 今日概览
+/** 获取所有可用日期 */
+function getAvailableDates() {
+  try {
+    return fs.readdirSync(LOGS_DIR)
+      .filter(f => f.endsWith('.json'))
+      .map(f => f.replace('.json', ''))
+      .sort().reverse()
+  } catch { return [] }
+}
+
+/**
+ * 获取单天统计（向后兼容）
+ */
+function getStats(date) {
+  const log = readDayLog(date || today())
   const totalVisits = log.visits?.length || 0
   const uniqueVisitors = log.uniqueIPs?.length || 0
   const totalDownloads = log.downloads?.length || 0
 
-  // 按小时分布
   const hourlyVisits = new Array(24).fill(0)
   const hourlyDownloads = new Array(24).fill(0)
-  ;(log.visits || []).forEach(v => {
-    const h = new Date(v.time).getHours()
-    hourlyVisits[h]++
-  })
-  ;(log.downloads || []).forEach(d => {
-    const h = new Date(d.time).getHours()
-    hourlyDownloads[h]++
-  })
+  ;(log.visits || []).forEach(v => { hourlyVisits[new Date(v.time).getHours()]++ })
+  ;(log.downloads || []).forEach(d => { hourlyDownloads[new Date(d.time).getHours()]++ })
 
-  // 热门设备
   const deviceCount = {}
-  ;(log.visits || []).forEach(v => {
-    deviceCount[v.device] = (deviceCount[v.device] || 0) + 1
-  })
-  const topDevices = Object.entries(deviceCount)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(([name, count]) => ({ name, count }))
+  ;(log.visits || []).forEach(v => { deviceCount[v.device] = (deviceCount[v.device] || 0) + 1 })
+  const topDevices = Object.entries(deviceCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count }))
 
-  // 用户 vs 游客
   const loggedInCount = (log.downloads || []).filter(d => d.user !== '游客').length
   const guestCount = totalDownloads - loggedInCount
-
-  // 最近下载记录 (最新 50 条)
   const recentDownloads = (log.downloads || []).slice(-50).reverse()
-
-  // 最近访问记录 (最新 100 条)
   const recentVisits = (log.visits || []).slice(-100).reverse()
-
-  // 可用日期列表（供日期切换）
-  let availableDates = []
-  try {
-    availableDates = fs.readdirSync(LOGS_DIR)
-      .filter(f => f.endsWith('.json'))
-      .map(f => f.replace('.json', ''))
-      .sort()
-      .reverse()
-  } catch {}
 
   return {
     date: date || today(),
-    totalVisits,
-    uniqueVisitors,
-    totalDownloads,
-    loggedInCount,
-    guestCount,
-    hourlyVisits,
-    hourlyDownloads,
-    topDevices,
-    recentDownloads,
-    recentVisits,
-    availableDates,
+    totalVisits, uniqueVisitors, totalDownloads,
+    loggedInCount, guestCount,
+    hourlyVisits, hourlyDownloads,
+    topDevices, recentDownloads, recentVisits,
+    availableDates: getAvailableDates(),
   }
 }
 
-module.exports = { accessLogger, logDownload, getStats }
+/**
+ * 多时间范围聚合统计
+ * @param {string} range - 'today' | '3d' | '7d' | '14d' | '30d' | '90d' | '180d' | '365d' | 'all'
+ */
+function getRangeStats(range) {
+  let dates
+  if (range === 'today') {
+    dates = [today()]
+  } else if (range === 'all') {
+    dates = getAvailableDates()
+  } else {
+    const days = parseInt(range) || 7
+    dates = getDateRange(days)
+  }
+
+  // 聚合所有天的数据
+  let totalVisits = 0
+  let totalDownloads = 0
+  const allIPs = new Set()
+  const deviceCount = {}
+  const dailyVisits = []   // 逐日 { date, visits, downloads, uniqueIPs }
+  const hourlyVisits = new Array(24).fill(0)
+  const hourlyDownloads = new Array(24).fill(0)
+  let loggedInCount = 0
+  let guestCount = 0
+  const recentDownloads = []
+  const recentVisits = []
+
+  // 按日期正序处理（图表用）
+  const sortedDates = [...dates].sort()
+  for (const date of sortedDates) {
+    const log = readDayLog(date)
+    const dayVisits = log.visits?.length || 0
+    const dayDownloads = log.downloads?.length || 0
+    const dayIPs = log.uniqueIPs?.length || 0
+
+    totalVisits += dayVisits
+    totalDownloads += dayDownloads
+    ;(log.uniqueIPs || []).forEach(ip => allIPs.add(ip))
+
+    dailyVisits.push({ date, visits: dayVisits, downloads: dayDownloads, uniqueIPs: dayIPs })
+
+    // 小时分布（聚合所有天）
+    ;(log.visits || []).forEach(v => {
+      const h = new Date(v.time).getHours()
+      hourlyVisits[h]++
+      deviceCount[v.device] = (deviceCount[v.device] || 0) + 1
+    })
+    ;(log.downloads || []).forEach(d => {
+      hourlyDownloads[new Date(d.time).getHours()]++
+      if (d.user !== '游客') loggedInCount++
+      else guestCount++
+    })
+
+    // 最近记录（取倒序前 50/100）
+    recentDownloads.push(...(log.downloads || []))
+    recentVisits.push(...(log.visits || []))
+  }
+
+  // 按时间倒序排序并截取
+  recentDownloads.sort((a, b) => new Date(b.time) - new Date(a.time))
+  recentVisits.sort((a, b) => new Date(b.time) - new Date(a.time))
+
+  const topDevices = Object.entries(deviceCount)
+    .sort((a, b) => b[1] - a[1]).slice(0, 15)
+    .map(([name, count]) => ({ name, count }))
+
+  return {
+    range,
+    dateCount: sortedDates.length,
+    totalVisits,
+    uniqueVisitors: allIPs.size,
+    totalDownloads,
+    loggedInCount, guestCount,
+    hourlyVisits, hourlyDownloads,
+    dailyVisits,
+    topDevices,
+    recentDownloads: recentDownloads.slice(0, 50),
+    recentVisits: recentVisits.slice(0, 100),
+    availableDates: getAvailableDates(),
+  }
+}
+
+module.exports = { accessLogger, logDownload, getStats, getRangeStats }

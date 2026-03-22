@@ -52,6 +52,9 @@
       <i class="fas fa-download"></i>
       <span v-if="downloadStore.activeCount > 0" class="side-badge">{{ downloadStore.activeCount }}</span>
     </button>
+    <button class="side-btn side-btn--music" @click="toggleMusic" title="音乐">
+      <i class="fas fa-music"></i>
+    </button>
   </div>
 
   <!-- Download Manager (侧滑面板) -->
@@ -153,6 +156,108 @@ function showToast(message: string, type: string = 'info') {
 
 provide('toast', showToast)
 
+function toggleMusic() {
+  const fn = (window as any).__toggleMusicPlayer
+  if (typeof fn === 'function') fn()
+}
+
+// 保存当前背景图（从浏览器显示的图直接导出）
+function saveBgImage() {
+  // 找到当前活跃的背景层
+  const layers = document.querySelectorAll('.bg-carousel__layer.active')
+  const layer = layers[0] as HTMLElement
+  if (!layer) { showToast('暂无背景图', 'warning'); return }
+
+  const bgStyle = getComputedStyle(layer).backgroundImage
+  const match = bgStyle.match(/url\(["']?(.*?)["']?\)/)
+  if (!match || !match[1]) { showToast('暂无背景图', 'warning'); return }
+
+  const imgUrl = match[1]
+  showToast('正在保存...', 'info')
+
+  // 用 Image 加载（浏览器缓存），再 canvas 导出
+  const img = new Image()
+  img.crossOrigin = 'anonymous'
+  img.onload = () => {
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.naturalWidth
+      canvas.height = img.naturalHeight
+      const ctx = canvas.getContext('2d')!
+      ctx.drawImage(img, 0, 0)
+      canvas.toBlob((blob) => {
+        if (!blob) { showToast('保存失败', 'error'); return }
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = `wallpaper_${Date.now()}.jpg`
+        a.click()
+        URL.revokeObjectURL(a.href)
+        showToast('背景图已保存 ✨', 'success')
+      }, 'image/jpeg', 0.95)
+    } catch {
+      // canvas 被污染（跨域），回退到后端代理
+      const proxyUrl = `/api/proxy/image?url=${encodeURIComponent(imgUrl)}`
+      fetch(proxyUrl)
+        .then(r => r.blob())
+        .then(blob => {
+          const a = document.createElement('a')
+          a.href = URL.createObjectURL(blob)
+          a.download = `wallpaper_${Date.now()}.jpg`
+          a.click()
+          URL.revokeObjectURL(a.href)
+          showToast('背景图已保存 ✨', 'success')
+        })
+        .catch(() => showToast('保存失败', 'error'))
+    }
+  }
+  img.onerror = () => {
+    // 直接用后端代理
+    const proxyUrl = `/api/proxy/image?url=${encodeURIComponent(imgUrl)}`
+    fetch(proxyUrl)
+      .then(r => r.blob())
+      .then(blob => {
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = `wallpaper_${Date.now()}.jpg`
+        a.click()
+        URL.revokeObjectURL(a.href)
+        showToast('背景图已保存 ✨', 'success')
+      })
+      .catch(() => showToast('保存失败', 'error'))
+  }
+  img.src = imgUrl
+}
+// 识别背景图角色
+const bgIdentifying = ref(false)
+async function identifyBgCharacter() {
+  const url = carousel.currentBgUrl.value
+  if (!url) { showToast('暂无背景图', 'warning'); return }
+  if (bgIdentifying.value) return
+  bgIdentifying.value = true
+  showToast('🔍 正在识别角色...', 'info')
+  try {
+    const { data } = await api.post('/api/chat', {
+      message: `请识别这张图片中的动漫角色。图片地址：${url}\n\n请告诉我：\n1. 角色名称\n2. 出自哪部作品\n3. 简短介绍\n如果无法识别，就描述图片里的内容。`,
+      sessionId: 'bg-identify-' + Date.now()
+    })
+    const reply = data?.reply || data?.data?.reply || '识别失败'
+    // 通过看板娘气泡显示结果
+    const tips = document.getElementById('waifu-tips')
+    if (tips) {
+      tips.textContent = reply.length > 200 ? reply.slice(0, 200) + '...' : reply
+      tips.style.opacity = '1'
+      tips.style.visibility = 'visible'
+      setTimeout(() => { tips.style.opacity = '0' }, 15000)
+    } else {
+      showToast(reply.length > 100 ? reply.slice(0, 100) + '...' : reply, 'info')
+    }
+  } catch (e) {
+    showToast('识别失败，请稍后再试', 'error')
+  } finally {
+    bgIdentifying.value = false
+  }
+}
+
 onMounted(() => {
   appStore.initThemeListener()
   fetchAnnouncement()
@@ -213,11 +318,33 @@ onMounted(() => {
     &:hover { background: var(--color-primary-hover); color: white; }
   }
 
+  &--music {
+    background: linear-gradient(135deg, #23d5ab, #00a1d6);
+    color: white;
+    border-color: #23d5ab;
+    &:hover { background: linear-gradient(135deg, #1ec9a0, #0090c0); color: white; }
+  }
+
   &--blue {
     background: var(--color-blue);
     color: white;
     border-color: var(--color-blue);
     &:hover { background: var(--color-blue-hover); color: white; }
+  }
+
+  &--purple {
+    background: linear-gradient(135deg, #a855f7, #7c3aed);
+    color: white;
+    border-color: #a855f7;
+    &:hover { background: linear-gradient(135deg, #9333ea, #6d28d9); color: white; }
+  }
+
+  &--orange {
+    background: linear-gradient(135deg, #f97316, #ea580c);
+    color: white;
+    border-color: #f97316;
+    &:hover { background: linear-gradient(135deg, #ea580c, #c2410c); color: white; }
+    &:disabled { opacity: 0.7; cursor: wait; }
   }
 
   &--avatar {
