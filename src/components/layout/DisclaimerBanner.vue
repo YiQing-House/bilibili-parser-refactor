@@ -66,11 +66,7 @@
   }
 }
 
-// 亮色主题微调
-:global([data-theme="light"]) .disclaimer-bar {
-  background: rgba(0, 161, 214, 0.04);
-  border-bottom-color: rgba(0, 161, 214, 0.08);
-}
+
 
 @keyframes disclaimerScroll {
   0% {

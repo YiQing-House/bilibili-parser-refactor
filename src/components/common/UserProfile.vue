@@ -54,6 +54,12 @@
               <button :class="['up-tab', { active: tab === 'favorites' }]" @click="switchTab('favorites')">
                 <i class="fas fa-star"></i> 收藏夹
               </button>
+              <button :class="['up-tab', { active: tab === 'liked' }]" @click="switchTab('liked')">
+                <i class="fas fa-thumbs-up"></i> 点赞
+              </button>
+              <button :class="['up-tab', { active: tab === 'history' }]" @click="switchTab('history')">
+                <i class="fas fa-history"></i> 历史
+              </button>
             </div>
 
             <!-- ========== 投稿列表 ========== -->
@@ -91,12 +97,21 @@
                   <span v-if="batchMode === 'sub'" :class="['up-checkbox', { checked: selectedSub.has(v.bvid) }]">
                     <i v-if="selectedSub.has(v.bvid)" class="fas fa-check"></i>
                   </span>
-                  <img :src="v.cover" class="up-video__cover" loading="lazy" referrerpolicy="no-referrer" />
+                  <div class="up-video__thumb">
+                    <img :src="v.cover" class="up-video__cover" loading="lazy" referrerpolicy="no-referrer" />
+                    <span v-if="qualityLabel(v.maxQuality)" class="up-video__qbadge">{{ qualityLabel(v.maxQuality) }}</span>
+                    <span v-if="v.duration" class="up-video__dur-badge">{{ v.duration }}</span>
+                  </div>
                   <div class="up-video__meta">
                     <span class="up-video__title">{{ v.title }}</span>
                     <span class="up-video__info">
-                      <i class="fas fa-play"></i> {{ fmt(v.plays) }}
-                      <span class="up-video__dur">{{ v.duration }}</span>
+                      <span v-if="v.created"><i class="fas fa-clock"></i> {{ fmtDate(v.created) }}</span>
+                      <span><i class="fas fa-play"></i> {{ fmt(v.plays) }}</span>
+                      <span v-if="v.danmakus != null"><i class="fas fa-bars-staggered"></i> {{ fmt(v.danmakus) }}</span>
+                    </span>
+                    <span class="up-video__info">
+                      <span v-if="v.comment != null"><i class="fas fa-comment"></i> {{ fmt(v.comment) }}</span>
+                      <span v-if="v.favorites != null"><i class="fas fa-star"></i> {{ fmt(v.favorites) }}</span>
                     </span>
                   </div>
                 </div>
@@ -166,12 +181,20 @@
                     <span v-if="batchMode === 'fav'" :class="['up-checkbox', { checked: selectedFav.has(v.bvid) }]">
                       <i v-if="selectedFav.has(v.bvid)" class="fas fa-check"></i>
                     </span>
-                    <img :src="v.cover" class="up-video__cover" loading="lazy" referrerpolicy="no-referrer" />
+                    <div class="up-video__thumb">
+                      <img :src="v.cover" class="up-video__cover" loading="lazy" referrerpolicy="no-referrer" />
+                      <span v-if="v.duration" class="up-video__dur-badge">{{ v.duration }}</span>
+                    </div>
                     <div class="up-video__meta">
                       <span class="up-video__title">{{ v.title }}</span>
                       <span class="up-video__info">
-                        <i class="fas fa-play"></i> {{ fmt(v.plays) }}
-                        <span v-if="v.upper" class="up-video__up">{{ v.upper }}</span>
+                        <span v-if="v.upper"><i class="fas fa-user"></i> {{ v.upper }}</span>
+                        <span><i class="fas fa-play"></i> {{ fmt(v.plays) }}</span>
+                        <span v-if="v.danmakus != null"><i class="fas fa-bars-staggered"></i> {{ fmt(v.danmakus) }}</span>
+                      </span>
+                      <span class="up-video__info">
+                        <span v-if="v.favorites != null"><i class="fas fa-star"></i> {{ fmt(v.favorites) }}</span>
+                        <span v-if="v.pubdate"><i class="fas fa-clock"></i> {{ fmtDate(v.pubdate) }}</span>
                       </span>
                     </div>
                   </div>
@@ -179,6 +202,101 @@
                     {{ favVidLoading ? '加载中...' : '加载更多' }}
                   </button>
                 </template>
+              </template>
+            </div>
+
+            <!-- ========== 点赞视频列表 ========== -->
+            <div v-if="authStore.isLoggedIn && tab === 'liked'" class="up-list-area">
+              <!-- 搜索框 -->
+              <div class="up-search-bar">
+                <i class="fas fa-search"></i>
+                <input v-model="likedSearch" placeholder="搜索点赞视频..." />
+              </div>
+              <div v-if="likedLoading && !likedList.length" class="up-skeleton-list">
+                <div class="up-skeleton-item" v-for="i in 4" :key="i"></div>
+              </div>
+              <div v-else-if="likedError" class="up-error-box">
+                <p>{{ likedError }}</p>
+                <button @click="loadLiked(1)"><i class="fas fa-redo"></i> 重试</button>
+              </div>
+              <template v-else>
+                <div class="up-empty" v-if="!filteredLiked.length && !likedSearch">
+                  <i class="fas fa-inbox"></i><p>暂无点赞视频</p>
+                </div>
+                <div class="up-empty" v-else-if="!filteredLiked.length && likedSearch">
+                  <i class="fas fa-search"></i><p>未找到匹配视频</p>
+                </div>
+                <div
+                  v-for="v in filteredLiked" :key="v.bvid"
+                  class="up-video"
+                  @click="parseVideo(v.bvid)"
+                >
+                  <div class="up-video__thumb">
+                    <img :src="v.cover" class="up-video__cover" loading="lazy" referrerpolicy="no-referrer" />
+                  </div>
+                  <div class="up-video__meta">
+                    <span class="up-video__title">{{ v.title }}</span>
+                    <span class="up-video__info">
+                      <span v-if="v.upper"><i class="fas fa-user"></i> {{ v.upper }}</span>
+                      <span><i class="fas fa-play"></i> {{ fmt(v.plays) }}</span>
+                      <span v-if="v.likes"><i class="fas fa-thumbs-up"></i> {{ fmt(v.likes) }}</span>
+                    </span>
+                  </div>
+                </div>
+                <button v-if="likedHasMore" class="up-loadmore" @click="loadLiked(likedPage + 1)" :disabled="likedLoading">
+                  {{ likedLoading ? '加载中...' : '加载更多' }}
+                </button>
+              </template>
+            </div>
+
+            <!-- ========== 观看历史列表 ========== -->
+            <div v-if="authStore.isLoggedIn && tab === 'history'" class="up-list-area">
+              <!-- 搜索框 -->
+              <div class="up-search-bar">
+                <i class="fas fa-search"></i>
+                <input v-model="historySearch" placeholder="搜索观看历史..." />
+              </div>
+              <div v-if="historyLoading && !historyList.length" class="up-skeleton-list">
+                <div class="up-skeleton-item" v-for="i in 4" :key="i"></div>
+              </div>
+              <div v-else-if="historyError" class="up-error-box">
+                <p>{{ historyError }}</p>
+                <button @click="loadHistory()"><i class="fas fa-redo"></i> 重试</button>
+              </div>
+              <template v-else>
+                <div class="up-empty" v-if="!filteredHistory.length && !historySearch">
+                  <i class="fas fa-inbox"></i><p>暂无观看历史</p>
+                </div>
+                <div class="up-empty" v-else-if="!filteredHistory.length && historySearch">
+                  <i class="fas fa-search"></i><p>未找到匹配视频</p>
+                </div>
+                <div
+                  v-for="v in filteredHistory" :key="v.bvid"
+                  class="up-video"
+                  @click="parseVideo(v.bvid)"
+                >
+                  <div class="up-video__thumb">
+                    <img :src="v.cover" class="up-video__cover" loading="lazy" referrerpolicy="no-referrer" />
+                    <span v-if="v.duration" class="up-video__dur-badge">{{ v.duration }}</span>
+                    <!-- 进度条 -->
+                    <div v-if="v.progress > 0 && v.totalDuration > 0" class="up-video__progress">
+                      <div class="up-video__progress-fill" :style="{ width: Math.min(100, (v.progress / v.totalDuration) * 100) + '%' }"></div>
+                    </div>
+                  </div>
+                  <div class="up-video__meta">
+                    <span class="up-video__title">{{ v.title }}</span>
+                    <span class="up-video__info">
+                      <span v-if="v.upper"><i class="fas fa-user"></i> {{ v.upper }}</span>
+                      <span v-if="v.tag"><i class="fas fa-tag"></i> {{ v.tag }}</span>
+                    </span>
+                    <span class="up-video__info">
+                      <span><i class="fas fa-clock"></i> {{ fmtTimeAgo(v.viewAt) }}</span>
+                    </span>
+                  </div>
+                </div>
+                <button v-if="historyHasMore" class="up-loadmore" @click="loadHistoryMore()" :disabled="historyLoading">
+                  {{ historyLoading ? '加载中...' : '加载更多' }}
+                </button>
               </template>
             </div>
           </div>
@@ -233,7 +351,7 @@ function onLoginSuccess() {
 }
 
 // --- Tab ---
-const tab = ref<'submissions' | 'favorites'>('submissions')
+const tab = ref<'submissions' | 'favorites' | 'liked' | 'history'>('submissions')
 
 // --- 投稿 ---
 const subList = ref<any[]>([])
@@ -254,6 +372,40 @@ const favVidTotal = ref(0)
 const favVidPage = ref(1)
 const favVidLoading = ref(false)
 const favVidError = ref('')
+
+// --- 点赞 ---
+const likedList = ref<any[]>([])
+const likedPage = ref(1)
+const likedHasMore = ref(false)
+const likedLoading = ref(false)
+const likedError = ref('')
+
+// --- 历史 ---
+const historyList = ref<any[]>([])
+const historyCursor = ref<{ max: number; viewAt: number }>({ max: 0, viewAt: 0 })
+const historyHasMore = ref(false)
+const historyLoading = ref(false)
+const historyError = ref('')
+
+// --- 搜索 ---
+const likedSearch = ref('')
+const historySearch = ref('')
+
+const filteredLiked = computed(() => {
+  const q = likedSearch.value.trim().toLowerCase()
+  if (!q) return likedList.value
+  return likedList.value.filter(v =>
+    v.title?.toLowerCase().includes(q) || v.upper?.toLowerCase().includes(q)
+  )
+})
+
+const filteredHistory = computed(() => {
+  const q = historySearch.value.trim().toLowerCase()
+  if (!q) return historyList.value
+  return historyList.value.filter(v =>
+    v.title?.toLowerCase().includes(q) || v.upper?.toLowerCase().includes(q) || v.tag?.toLowerCase().includes(q)
+  )
+})
 
 // ==================== 批量下载 ====================
 const batchMode = ref<'sub' | 'fav' | null>(null)
@@ -395,12 +547,88 @@ const expPct = computed(() => {
 
 function fmt(n: number) { return Math.floor(n).toLocaleString('zh-CN') }
 
+// 画质 qn -> 显示文本
+const QN_MAP: Record<number, string> = {
+  120: '4K', 116: '1080P60', 112: '1080P+', 80: '1080P',
+  74: '720P60', 64: '720P', 32: '480P', 16: '360P',
+}
+function qualityLabel(qn: number | undefined) {
+  if (!qn) return ''
+  return QN_MAP[qn] || ''
+}
+
+function fmtDate(ts: number) {
+  const d = new Date(ts * 1000)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function fmtTimeAgo(ts: number) {
+  const now = Math.floor(Date.now() / 1000)
+  const diff = now - ts
+  if (diff < 60) return '刚刚'
+  if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`
+  if (diff < 2592000) return `${Math.floor(diff / 86400)}天前`
+  return fmtDate(ts)
+}
+
+// 加载点赞视频
+async function loadLiked(page: number) {
+  likedLoading.value = true
+  likedError.value = ''
+  try {
+    const res = await authApi.getLikedVideos(page)
+    if (page === 1) likedList.value = res.list
+    else likedList.value.push(...res.list)
+    likedHasMore.value = res.hasMore
+    likedPage.value = page
+  } catch (e: any) {
+    likedError.value = e.message || '加载失败'
+  } finally {
+    likedLoading.value = false
+  }
+}
+
+// 加载观看历史（首次）
+async function loadHistory() {
+  historyLoading.value = true
+  historyError.value = ''
+  historyCursor.value = { max: 0, viewAt: 0 }
+  try {
+    const res = await authApi.getHistory()
+    historyList.value = res.list
+    historyHasMore.value = res.hasMore
+    historyCursor.value = res.cursor || { max: 0, viewAt: 0 }
+  } catch (e: any) {
+    historyError.value = e.message || '加载失败'
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+// 加载更多历史（cursor 分页）
+async function loadHistoryMore() {
+  historyLoading.value = true
+  try {
+    const res = await authApi.getHistory(historyCursor.value.max, historyCursor.value.viewAt)
+    historyList.value.push(...res.list)
+    historyHasMore.value = res.hasMore
+    historyCursor.value = res.cursor || { max: 0, viewAt: 0 }
+  } catch (e: any) {
+    historyError.value = e.message || '加载失败'
+  } finally {
+    historyLoading.value = false
+  }
+}
+
 // 切换 tab
-function switchTab(t: 'submissions' | 'favorites') {
+function switchTab(t: 'submissions' | 'favorites' | 'liked' | 'history') {
   tab.value = t
   exitBatchMode()
   if (t === 'submissions' && !subList.value.length) loadSubmissions(1)
   if (t === 'favorites' && !favFolders.value.length) loadFavorites()
+  if (t === 'liked' && !likedList.value.length) loadLiked(1)
+  if (t === 'history' && !historyList.value.length) loadHistory()
 }
 
 // 加载投稿
@@ -699,9 +927,39 @@ watch(() => authStore.profilePanelOpen, (open) => {
     border-color: rgba(251, 114, 153, 0.2);
   }
 
+  &__thumb {
+    position: relative;
+    flex-shrink: 0;
+    width: 100px;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
   &__cover {
-    width: 100px; height: 60px; border-radius: var(--radius-sm);
-    object-fit: cover; flex-shrink: 0; background: var(--color-bg-hover);
+    width: 100%; height: 60px;
+    object-fit: cover; display: block;
+    background: var(--color-bg-hover);
+  }
+  &__dur-badge {
+    position: absolute;
+    bottom: 3px; right: 3px;
+    background: rgba(0, 0, 0, 0.75);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 4px;
+    border-radius: 3px;
+    line-height: 1.3;
+  }
+  &__qbadge {
+    position: absolute;
+    top: 3px; left: 3px;
+    background: rgba(0, 161, 214, 0.85);
+    color: #fff;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    line-height: 1.3;
   }
   &__meta {
     flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 4px;
@@ -711,12 +969,47 @@ watch(() => authStore.profilePanelOpen, (open) => {
     @include text-ellipsis; font-weight: var(--font-weight-medium);
   }
   &__info {
-    font-size: 11px; color: var(--color-text-secondary);
-    display: flex; align-items: center; gap: 6px;
-    i { font-size: 10px; }
+    font-size: 10px; color: var(--color-text-secondary);
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    span {
+      display: inline-flex; align-items: center; gap: 2px; white-space: nowrap;
+    }
+    i { font-size: 9px; opacity: 0.7; transform: translateY(0.5px); }
   }
   &__dur, &__up {
     color: var(--color-text-placeholder); font-size: 10px;
+  }
+  &__progress {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 3px;
+    background: rgba(255, 255, 255, 0.15);
+  }
+  &__progress-fill {
+    height: 100%;
+    background: #00a1d6;
+    border-radius: 0 2px 2px 0;
+    transition: width 0.3s;
+  }
+}
+
+// ---- 搜索框 ----
+.up-search-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; margin-bottom: 6px;
+  background: var(--color-bg-hover);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  transition: border-color 0.2s;
+  &:focus-within {
+    border-color: rgba(0, 161, 214, 0.4);
+  }
+  i { font-size: 11px; color: var(--color-text-placeholder); }
+  input {
+    flex: 1; border: none; outline: none;
+    background: transparent; color: var(--color-text-primary);
+    font-size: 12px;
+    &::placeholder { color: var(--color-text-placeholder); }
   }
 }
 

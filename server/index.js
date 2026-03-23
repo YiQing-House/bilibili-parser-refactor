@@ -16,6 +16,7 @@ const express = require('express')
 const cors = require('cors')
 const axios = require('axios')
 const cookieParser = require('cookie-parser')
+const rateLimit = require('express-rate-limit')
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
@@ -28,20 +29,19 @@ const multiPlatformService = require('./services/multiPlatformService')
 const ytdlpService = require('./services/ytdlpService')
 
 const app = express()
-const PORT = process.env.PORT || 3000
+const PORT = process.env.PORT || 7621  // [P3] 默认端口与 .env 和 vite 代理保持一致
 
-// ==================== 下载进度追踪 ====================
-const downloadProgress = new Map()
-function updateDownloadProgress(taskId, data) {
-  downloadProgress.set(taskId, { ...data, updatedAt: Date.now() })
+// [P3] 公共请求头常量（消除 14 处重复）
+const BILIBILI_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+  'Referer': 'https://www.bilibili.com/',
 }
-setInterval(() => {
-  const now = Date.now()
-  for (const [taskId, data] of downloadProgress.entries()) {
-    if (now - data.updatedAt > 5 * 60 * 1000) downloadProgress.delete(taskId)
-  }
-}, 60000)
-global.updateDownloadProgress = updateDownloadProgress
+
+// ==================== 下载进度追踪（模块化）====================
+const ProgressTracker = require('./shared/progressTracker')
+const downloadProgress = new ProgressTracker()
+// 向 bilibiliService 注入进度更新函数（替代 global 污染）
+global.updateDownloadProgress = (taskId, data) => downloadProgress.update(taskId, data)
 
 // 持久化会话存储（JSON 文件，重启不丢失）
 const loginSessions = new SessionStore()
@@ -53,9 +53,33 @@ const { accessLogger, logDownload, getStats, getRangeStats } = require('./analyt
 const { registerChatAPI, registerVideoAnalysis } = require('./chat')
 
 // 中间件
-app.use(cors({ origin: true, credentials: true }))
+// [安全] CORS 白名单 — 只允许已知来源
+const CORS_WHITELIST = [
+  'http://localhost:7622',
+  'http://localhost:7621',
+  'http://127.0.0.1:7622',
+  process.env.CORS_ORIGIN, // 生产域名从 .env 注入
+].filter(Boolean)
+app.use(cors({
+  origin: (origin, cb) => {
+    // 允许无 origin 的请求（如服务器直接访问、Postman）
+    if (!origin || CORS_WHITELIST.includes(origin)) return cb(null, true)
+    cb(new Error('CORS 被拒绝'))
+  },
+  credentials: true,
+}))
 app.use(cookieParser())
 app.use(express.json())
+
+// [安全] 速率限制
+const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, message: { success: false, error: '请求过于频繁，请稍后再试' } })
+const parseLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, message: { success: false, error: '解析请求过于频繁' } })
+const downloadLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, message: { success: false, error: '下载请求过于频繁' } })
+const adminLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: { success: false, error: '管理接口请求过于频繁' } })
+app.use('/api/', apiLimiter)
+app.use('/api/parse', parseLimiter)
+app.use('/api/download', downloadLimiter)
+app.use('/api/admin', adminLimiter)
 
 // FFmpeg.wasm 需要 SharedArrayBuffer，必须设置 COOP/COEP 头
 // 使用 credentialless 模式，比 require-corp 更宽松，不会阻止跨域图片/CDN 资源
@@ -76,7 +100,7 @@ app.get('/api/bilibili/qrcode', async (req, res) => {
       'https://passport.bilibili.com/x/passport-login/web/qrcode/generate',
       {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          ...BILIBILI_HEADERS,
           'Referer': 'https://www.bilibili.com/',
         },
       }
@@ -238,16 +262,25 @@ app.get('/api/bilibili/userinfo', async (req, res) => {
   }
 })
 
-// 辅助：构造已登录请求头
+// 辅助：构造已登录请求头（基于公共常量）
 function getAuthHeaders(cookies) {
   return {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    ...BILIBILI_HEADERS,
     'Cookie': `SESSDATA=${cookies.SESSDATA}; bili_jct=${cookies.bili_jct}; DedeUserID=${cookies.DedeUserID}`,
-    'Referer': 'https://www.bilibili.com/',
   }
 }
 
 // 获取用户投稿视频
+// 根据视频分辨率宽度推算最高画质(qn值)
+function estimateQuality(width) {
+  if (!width) return 0
+  if (width >= 3840) return 120  // 4K
+  if (width >= 1920) return 80   // 1080P
+  if (width >= 1280) return 64   // 720P
+  if (width >= 854)  return 32   // 480P
+  return 16                       // 360P
+}
+
 app.get('/api/bilibili/submissions', async (req, res) => {
   try {
     const sessionId = req.cookies?.bili_session
@@ -288,6 +321,12 @@ app.get('/api/bilibili/submissions', async (req, res) => {
           plays: v.play,
           duration: v.length,
           created: v.created,
+          comment: v.comment,           // 评论数
+          danmakus: v.video_review,     // 弹幕数
+          favorites: v.favorites,       // 收藏数
+          description: v.description,   // 简介
+          // 根据分辨率推算最高画质
+          maxQuality: estimateQuality(v.dimension?.width),
         })),
       },
     })
@@ -350,19 +389,133 @@ app.get('/api/bilibili/favorites/:id', async (req, res) => {
       success: true,
       data: {
         total,
-        list: medias.map(m => ({
-          bvid: m.bvid,
-          title: m.title,
-          cover: m.cover?.startsWith('//') ? `https:${m.cover}` : m.cover,
-          plays: m.cnt_info?.play || 0,
-          duration: m.duration,
-          upper: m.upper?.name || '',
-        })),
+        list: medias.map(m => {
+          // duration 为秒数，格式化为 mm:ss
+          const dur = m.duration || 0
+          const mm = Math.floor(dur / 60)
+          const ss = dur % 60
+          const durText = `${mm}:${String(ss).padStart(2, '0')}`
+          return {
+            bvid: m.bvid,
+            title: m.title,
+            cover: m.cover?.startsWith('//') ? `https:${m.cover}` : m.cover,
+            plays: m.cnt_info?.play || 0,
+            duration: durText,
+            upper: m.upper?.name || '',
+            favorites: m.cnt_info?.collect || 0,   // 收藏数
+            danmakus: m.cnt_info?.danmaku || 0,     // 弹幕数
+            pubdate: m.pubtime || 0,                // 发布时间(秒级时间戳)
+          }
+        }),
       },
     })
   } catch (error) {
     console.error('[FavDetail] 获取失败:', error.message)
     res.status(500).json({ success: false, error: '获取收藏夹内容失败' })
+  }
+})
+// 获取观看历史
+app.get('/api/bilibili/history', async (req, res) => {
+  try {
+    const sessionId = req.cookies?.bili_session
+    if (!sessionId || !loginSessions.has(sessionId)) {
+      return res.status(401).json({ success: false, error: '未登录' })
+    }
+    const { cookies } = loginSessions.get(sessionId)
+    const headers = getAuthHeaders(cookies)
+    const ps = parseInt(req.query.ps) || 20
+    const max = parseInt(req.query.max) || 0       // cursor: max aid
+    const viewAt = parseInt(req.query.view_at) || 0 // cursor: view_at
+
+    let url = `https://api.bilibili.com/x/web-interface/history/cursor?ps=${ps}&type=archive`
+    if (max) url += `&max=${max}&view_at=${viewAt}`
+
+    const apiRes = await axios.get(url, { headers, timeout: 10000 })
+    if (apiRes.data?.code !== 0) {
+      return res.status(500).json({ success: false, error: apiRes.data?.message || '接口异常' })
+    }
+
+    const list = apiRes.data?.data?.list || []
+    const cursor = apiRes.data?.data?.cursor || {}
+
+    res.json({
+      success: true,
+      data: {
+        cursor: { max: cursor.max, viewAt: cursor.view_at },
+        hasMore: list.length >= ps,
+        list: list.map(item => {
+          const dur = item.duration || 0
+          const mm = Math.floor(dur / 60)
+          const ss = dur % 60
+          const durText = `${mm}:${String(ss).padStart(2, '0')}`
+          return {
+            bvid: item.history?.bvid || '',
+            title: item.title || '',
+            cover: item.cover?.startsWith('//') ? `https:${item.cover}` : (item.cover || ''),
+            plays: item.view_at || 0,   // 这里没有播放量，用最后观看时间
+            duration: durText,
+            progress: item.progress || 0,       // 观看进度(秒)
+            totalDuration: dur,                  // 总时长(秒)
+            upper: item.author_name || '',
+            viewAt: item.view_at || 0,          // 最后观看时间(秒级时间戳)
+            tag: item.tag_name || '',
+          }
+        }),
+      },
+    })
+  } catch (error) {
+    console.error('[History] 获取失败:', error.message)
+    res.status(500).json({ success: false, error: '获取观看历史失败' })
+  }
+})
+
+// 获取点赞视频
+app.get('/api/bilibili/liked', async (req, res) => {
+  try {
+    const sessionId = req.cookies?.bili_session
+    if (!sessionId || !loginSessions.has(sessionId)) {
+      return res.status(401).json({ success: false, error: '未登录' })
+    }
+    const { cookies } = loginSessions.get(sessionId)
+    const headers = getAuthHeaders(cookies)
+    const pn = parseInt(req.query.page) || 1
+    const ps = 20
+
+    const params = { vmid: cookies.DedeUserID, pn, ps }
+    const signedParams = await encWbi(params, headers)
+    const qs = Object.entries(signedParams).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
+
+    const apiRes = await axios.get(
+      `https://api.bilibili.com/x/space/like/video?${qs}`,
+      { headers, timeout: 10000 }
+    )
+
+    if (apiRes.data?.code !== 0) {
+      console.error('[Liked] B站返回:', apiRes.data?.code, apiRes.data?.message)
+      return res.status(500).json({ success: false, error: apiRes.data?.message || '接口异常' })
+    }
+
+    const list = apiRes.data?.data?.list || []
+
+    res.json({
+      success: true,
+      data: {
+        hasMore: list.length >= ps,
+        list: list.map(v => ({
+          bvid: v.bvid || '',
+          title: v.title || '',
+          cover: v.pic?.startsWith('//') ? `https:${v.pic}` : (v.pic || ''),
+          plays: v.stat?.view || 0,
+          likes: v.stat?.like || 0,
+          upper: v.owner?.name || '',
+          duration: v.duration || 0,
+          pubdate: v.pubdate || 0,
+        })),
+      },
+    })
+  } catch (error) {
+    console.error('[Liked] 获取失败:', error.message)
+    res.status(500).json({ success: false, error: '获取点赞视频失败' })
   }
 })
 
@@ -398,7 +551,7 @@ app.post('/api/parse', async (req, res) => {
 // B站视频解析逻辑
 async function parseBilibiliVideo(url, cookies) {
   const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    ...BILIBILI_HEADERS,
     'Referer': 'https://www.bilibili.com/',
   }
   if (cookies) {
@@ -564,7 +717,8 @@ app.get('/api/download-file/:filename', (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
     const fileStream = fs.createReadStream(filePath)
     fileStream.pipe(res)
-    fileStream.on('end', () => { setTimeout(() => { try { fs.unlinkSync(filePath) } catch {} }, 5000) })
+    // [P3] 延长删除延时 5s→60s 避免慢速传输被截断
+    res.on('close', () => { setTimeout(() => { try { fs.unlinkSync(filePath) } catch {} }, 60000) })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
@@ -665,21 +819,114 @@ app.get('/api/proxy/image', async (req, res) => {
   }
 })
 
-// 视频下载代理
+// ==================== 302 重定向直下（不走服务器带宽）====================
+// B站 CDN 签名链接不检查 Referer，可以直接 302 重定向让浏览器直下
+app.get('/api/download/redirect', async (req, res) => {
+  try {
+    const { url, filename } = req.query
+    if (!url) return res.status(400).json({ success: false, error: '请提供视频 CDN 链接' })
+
+    // 如果传入的就是 CDN 直链，直接 302
+    const isCdnUrl = url.includes('bilivideo.') || url.includes('akamaized.net') || url.includes('hdslb.com')
+    if (isCdnUrl) {
+      if (filename) {
+        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
+      }
+      return res.redirect(302, url)
+    }
+
+    // 如果是 BV 号或视频链接，先解析获取 CDN 链接再重定向
+    let cookies = null
+    const sessionId = req.cookies?.bili_session
+    if (sessionId && loginSessions.has(sessionId)) cookies = loginSessions.get(sessionId).cookies
+
+    // 提取 BV 号
+    const bvMatch = url.match(/BV\w+/i)
+    if (!bvMatch) return res.status(400).json({ success: false, error: '无法识别的视频链接' })
+
+    const qn = parseInt(req.query.qn) || 80
+    const result = await parseBilibiliVideo(url, cookies)
+    
+    // 通过 playurl API 获取 CDN 直链
+    const params = {
+      bvid: result.bvid,
+      cid: result.cid,
+      qn: qn,
+      fnval: 16,  // DASH 格式
+      fourk: 1,
+    }
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Referer': 'https://www.bilibili.com/',
+    }
+    if (cookies) {
+      headers['Cookie'] = typeof cookies === 'string'
+        ? cookies
+        : Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ')
+    }
+
+    const playResp = await axios.get(
+      `https://api.bilibili.com/x/player/playurl?${new URLSearchParams(params)}`,
+      { headers, timeout: 10000 }
+    )
+
+    if (playResp.data.code !== 0) {
+      return res.status(500).json({ success: false, error: playResp.data.message || 'playurl 失败' })
+    }
+
+    const playData = playResp.data.data
+    let cdnUrl = ''
+
+    // DASH 格式：取视频流
+    if (playData.dash && playData.dash.video && playData.dash.video.length > 0) {
+      cdnUrl = playData.dash.video[0].baseUrl || playData.dash.video[0].base_url
+    }
+    // FLV 格式
+    else if (playData.durl && playData.durl.length > 0) {
+      cdnUrl = playData.durl[0].url
+    }
+
+    if (!cdnUrl) {
+      return res.status(500).json({ success: false, error: '未获取到视频流 URL' })
+    }
+
+    // 302 重定向到 CDN 直链
+    const videoFilename = filename || `${result.title || 'video'}.mp4`
+    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(videoFilename)}"`)
+    res.redirect(302, cdnUrl)
+  } catch (error) {
+    console.error('[Download/Redirect] 错误:', error.message)
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, error: error.message })
+    }
+  }
+})
+
+// [安全] 允许下载代理的域名白名单
+const ALLOWED_CDN_DOMAINS = ['bilivideo.com', 'bilivideo.cn', 'akamaized.net', 'hdslb.com', 'biliimg.com']
+function isAllowedCdnUrl(urlStr) {
+  try {
+    const hostname = new URL(urlStr).hostname
+    return ALLOWED_CDN_DOMAINS.some(d => hostname.endsWith(d))
+  } catch { return false }
+}
+
+// 视频下载代理（兜底方案，走服务器带宽）
 app.get('/api/download', async (req, res) => {
   try {
     const { url, filename } = req.query
     if (!url) return res.status(400).json({ success: false, error: '请提供视频链接' })
+    // [安全] 只允许 B站 CDN 域名，防止开放代理
+    if (!isAllowedCdnUrl(url)) {
+      return res.status(403).json({ success: false, error: '不允许代理此域名的资源' })
+    }
     const videoFilename = filename || `video_${Date.now()}.mp4`
-    const isBilibiliCdn = url.includes('bilivideo.') || url.includes('akamaized.net') || url.includes('bilibili.com') || url.includes('hdslb.com')
-    const referer = isBilibiliCdn ? 'https://www.bilibili.com/' : new URL(url).origin
     const response = await axios({ method: 'GET', url, responseType: 'stream', timeout: 300000, maxRedirects: 5,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': '*/*', 'Referer': referer, 'Origin': isBilibiliCdn ? 'https://www.bilibili.com' : undefined }
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': '*/*', 'Referer': 'https://www.bilibili.com/', 'Origin': 'https://www.bilibili.com' }
     })
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(videoFilename)}"`)
     res.setHeader('Content-Type', response.headers['content-type'] || 'video/mp4')
     if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length'])
-    res.setHeader('Access-Control-Allow-Origin', '*')
     response.data.pipe(res)
   } catch (error) {
     if (!res.headersSent) res.status(500).json({ success: false, error: error.message })
@@ -861,6 +1108,54 @@ app.get('/api/user/profile-analysis', async (req, res) => {
 
 
 // ==================== 视频字幕抓取 ====================
+// 获取 B 站 AI 视频总结
+app.get('/api/video/ai-summary', async (req, res) => {
+  try {
+    const { bvid, cid, up_mid } = req.query
+    if (!bvid || !cid) return res.status(400).json({ success: false, error: '缺少 bvid 或 cid' })
+
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Referer': 'https://www.bilibili.com/',
+    }
+    // 带上登录态，部分视频可能需要
+    const sessionId = req.cookies?.bili_session
+    if (sessionId && loginSessions.has(sessionId)) {
+      const cookies = loginSessions.get(sessionId).cookies
+      headers['Cookie'] = `SESSDATA=${cookies.SESSDATA}; bili_jct=${cookies.bili_jct}; DedeUserID=${cookies.DedeUserID}`
+    }
+
+    let url = `https://api.bilibili.com/x/web-interface/view/conclusion/get?bvid=${bvid}&cid=${cid}`
+    if (up_mid) url += `&up_mid=${up_mid}`
+
+    const apiRes = await axios.get(url, { headers, timeout: 10000 })
+    const data = apiRes.data?.data
+
+    if (apiRes.data?.code !== 0 || !data?.model_result) {
+      return res.json({ success: true, summary: '', available: false })
+    }
+
+    // model_result 包含 summary 字段（文本摘要）和 outline 字段（分段大纲）
+    const result = data.model_result
+    let summaryText = result.summary || ''
+
+    // 如果有分段大纲，拼接为更详细的结构
+    if (result.outline && result.outline.length > 0) {
+      const outlineText = result.outline.map(section => {
+        const parts = section.part_outline?.map(p => `  • ${p.content}`).join('\n') || ''
+        return `【${section.title}】\n${parts}`
+      }).join('\n')
+      if (outlineText) summaryText += '\n\n' + outlineText
+    }
+
+    console.log(`[AISummary] ${bvid}: ${summaryText ? '成功' : '无内容'}`)
+    res.json({ success: true, summary: summaryText, available: !!summaryText })
+  } catch (error) {
+    console.error('[AISummary] 获取失败:', error.message)
+    res.json({ success: true, summary: '', available: false })
+  }
+})
+
 app.get('/api/video/subtitle', async (req, res) => {
   try {
     const { bvid, cid } = req.query
@@ -927,12 +1222,22 @@ app.get('/api/bilibili/danmaku/:cid', async (req, res) => {
 })
 
 // ==================== 头像代理 ====================
+// [安全] 头像域名白名单，防止 SSRF
+const AVATAR_ALLOWED_HOSTS = ['i0.hdslb.com', 'i1.hdslb.com', 'i2.hdslb.com', 'hdslb.com', 'static.hdslb.com']
 app.get('/api/proxy/avatar', async (req, res) => {
   try {
     const { url } = req.query
     if (!url) return res.status(400).send('缺少 url 参数')
+    // [安全] 验证头像 URL 域名
+    try {
+      const hostname = new URL(url).hostname
+      if (!AVATAR_ALLOWED_HOSTS.some(h => hostname === h || hostname.endsWith('.' + h))) {
+        return res.status(403).send('不允许代理此域名')
+      }
+    } catch { return res.status(400).send('URL 格式错误') }
     const response = await axios.get(url, {
       responseType: 'arraybuffer',
+      timeout: 10000,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Referer': 'https://www.bilibili.com/',
@@ -947,425 +1252,29 @@ app.get('/api/proxy/avatar', async (req, res) => {
   }
 })
 
-// ==================== 云通告系统 ====================
-const ANNOUNCEMENT_FILE = path.join(__dirname, 'announcement.json')
-const ADMIN_PASSWORD = process.env.ADMIN_PWD || 'bili2025'
+// ==================== 路由模块注册 ====================
+// 管理面板（通告 + 看板 + 页面）
+const adminRoutes = require('./routes/admin')
+app.use('/api', adminRoutes)
+app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')))
+app.get('/admin/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'dashboard.html')))
 
-function readAnnouncements() {
-  try {
-    if (fs.existsSync(ANNOUNCEMENT_FILE)) {
-      const raw = JSON.parse(fs.readFileSync(ANNOUNCEMENT_FILE, 'utf-8'))
-      // 兼容旧格式（单条对象 → 数组）
-      if (Array.isArray(raw)) return raw
-      if (raw.title || raw.content) return [raw]
-    }
-  } catch (e) { console.error('[Announcement] read error:', e.message) }
-  return []
-}
-
-function writeAnnouncements(list) {
-  fs.writeFileSync(ANNOUNCEMENT_FILE, JSON.stringify(list, null, 2), 'utf-8')
-}
-
-// 公开接口：获取所有启用的通告（最新在前）
-app.get('/api/announcement', (req, res) => {
-  const all = readAnnouncements()
-  const enabled = all.filter(a => a.enabled && a.content)
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-  res.json({ success: true, data: enabled.length ? enabled : null })
-})
-
-// 管理接口：新增通告（密码保护）
-app.post('/api/admin/announcement', (req, res) => {
-  const { password, title, content, enabled } = req.body
-  if (password !== ADMIN_PASSWORD) {
-    return res.status(403).json({ success: false, error: 'wrong password' })
-  }
-  const all = readAnnouncements()
-  const item = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-    title: title || '',
-    content: content || '',
-    enabled: enabled !== false,
-    updatedAt: new Date().toISOString(),
-  }
-  all.unshift(item) // 最新的在前
-  writeAnnouncements(all)
-  console.log('[Announcement] added:', item.title)
-  res.json({ success: true, data: item })
-})
-
-// 管理接口：删除通告
-app.delete('/api/admin/announcement/:id', (req, res) => {
-  const { password } = req.query
-  if (password !== ADMIN_PASSWORD) {
-    return res.status(403).json({ success: false, error: 'wrong password' })
-  }
-  let all = readAnnouncements()
-  all = all.filter(a => a.id !== req.params.id)
-  writeAnnouncements(all)
-  res.json({ success: true })
-})
-
-// 管理接口：获取全部通告（含禁用的）
-app.get('/api/admin/announcements', (req, res) => {
-  const { password } = req.query
-  if (password !== ADMIN_PASSWORD) {
-    return res.status(403).json({ success: false, error: 'wrong password' })
-  }
-  const all = readAnnouncements()
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-  res.json({ success: true, data: all })
-})
-
-// 管理页面
-app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'admin.html'))
-})
-
-// 数据看板页面
-app.get('/admin/dashboard', (req, res) => {
-  res.sendFile(path.join(__dirname, 'dashboard.html'))
-})
-
-// 看板数据 API（密码保护）
-app.get('/api/admin/stats', (req, res) => {
-  const { password, date, range } = req.query
-  if (password !== ADMIN_PASSWORD) {
-    return res.status(403).json({ success: false, error: '密码错误' })
-  }
-  // range 优先，否则按 date 查单天
-  if (range) {
-    const data = getRangeStats(range)
-    res.json({ success: true, data })
-  } else {
-    const data = getStats(date)
-    res.json({ success: true, data })
-  }
-})
-
-// ==================== 音乐播放器 API（网易云 API Enhanced）====================
-const NETEASE_API = 'https://music-api.qhouse.asia'
-const NETEASE_COOKIE = process.env.NETEASE_COOKIE || ''  // 可选：网易云 Cookie，解锁 VIP 歌曲
-const musicCache = { songs: [], updatedAt: 0, dayKey: '' }
-
-if (NETEASE_COOKIE) {
-  console.log('[Music] 已配置网易云 Cookie（VIP 模式）')
-} else {
-  console.log('[Music] 未配置 Cookie，仅免费歌曲可用')
-}
-
-// 网易云歌单 ID 列表（每天轮换）
-const MUSIC_PLAYLISTS = [
-  '3778678',      // 热歌榜
-  '3779629',      // 新歌榜
-  '19723756',     // 飙升榜
-  '2884035',      // 原创榜
-  '991319590',    // 华语金曲
-  '5059633707',   // ACG 动漫
-  '745956260',    // 欧美经典
-  '5059642708',   // 日语经典
-  '2809577409',   // 电子音乐
-  '60198',        // Billboard
-]
-
-// 从网易云歌单获取歌曲 + URL
-async function fetchPlaylistSongs(playlistId) {
-  try {
-    // 1. 获取歌单曲目
-    const headers = NETEASE_COOKIE ? { Cookie: NETEASE_COOKIE } : {}
-    const listRes = await axios.get(`${NETEASE_API}/playlist/track/all`, {
-      params: { id: playlistId, limit: 200 },
-      headers,
-      timeout: 20000,
-    })
-    const songs = listRes.data?.songs || []
-    if (!songs.length) return []
-
-    // 2. 批量获取 URL（每批 50 首）
-    const result = []
-    for (let i = 0; i < songs.length; i += 50) {
-      const batch = songs.slice(i, i + 50)
-      const ids = batch.map(s => s.id).join(',')
-      try {
-        const urlRes = await axios.get(`${NETEASE_API}/song/url/v1`, {
-          params: { id: ids, level: 'standard' },
-          headers,
-          timeout: 15000,
-        })
-        const urlMap = {}
-        for (const u of (urlRes.data?.data || [])) {
-          if (u.url) urlMap[u.id] = u.url
-        }
-        // 只保留有 URL 的歌曲
-        for (const s of batch) {
-          if (urlMap[s.id]) {
-            result.push({
-              id: s.id,
-              name: s.name,
-              artist: (s.ar || []).map(a => a.name).join('/'),
-              url: urlMap[s.id],
-              pic: s.al?.picUrl ? s.al.picUrl + '?param=100y100' : '',
-            })
-          }
-        }
-      } catch (e) {
-        console.error(`[Music] URL 批次失败:`, e.message)
-      }
-    }
-    return result
-  } catch (e) {
-    console.error(`[Music] 歌单 ${playlistId} 失败:`, e.message)
-    return []
-  }
-}
-
-// 获取个人每日推荐歌曲
-async function fetchRecommendSongs() {
-  if (!NETEASE_COOKIE) return []
-  try {
-    const headers = { Cookie: NETEASE_COOKIE }
-    const res = await axios.get(`${NETEASE_API}/recommend/songs`, { headers, timeout: 15000 })
-    const songs = res.data?.data?.dailySongs || []
-    if (!songs.length) return []
-
-    // 批量获取 URL
-    const result = []
-    for (let i = 0; i < songs.length; i += 50) {
-      const batch = songs.slice(i, i + 50)
-      const ids = batch.map(s => s.id).join(',')
-      try {
-        const urlRes = await axios.get(`${NETEASE_API}/song/url/v1`, {
-          params: { id: ids, level: 'standard' }, headers, timeout: 15000,
-        })
-        const urlMap = {}
-        for (const u of (urlRes.data?.data || [])) { if (u.url) urlMap[u.id] = u.url }
-        for (const s of batch) {
-          if (urlMap[s.id]) {
-            result.push({
-              id: s.id, name: s.name,
-              artist: (s.ar || []).map(a => a.name).join('/'),
-              url: urlMap[s.id],
-              pic: s.al?.picUrl ? s.al.picUrl + '?param=100y100' : '',
-            })
-          }
-        }
-      } catch (e) { /* skip */ }
-    }
-    console.log(`[Music] 个人推荐: ${result.length} 首可播放`)
-    return result
-  } catch (e) {
-    console.error('[Music] 个人推荐获取失败:', e.message)
-    return []
-  }
-}
-
-// 获取每日歌单（个人推荐优先，榜单兜底）
-async function getDailyPlaylist() {
-  const today = new Date().toISOString().slice(0, 10)
-  const cacheAge = Date.now() - musicCache.updatedAt
-  if (musicCache.dayKey === today && musicCache.songs.length > 0 && cacheAge < 2 * 3600 * 1000) {
-    return musicCache.songs
-  }
-
-  const allSongs = []
-
-  // 1. 优先：个人每日推荐（需要 Cookie）
-  if (NETEASE_COOKIE) {
-    const recommend = await fetchRecommendSongs()
-    allSongs.push(...recommend)
-  }
-
-  // 2. 补充：从榜单里补到至少 80 首
-  if (allSongs.length < 80) {
-    const dayHash = today.split('-').reduce((a, b) => a + parseInt(b), 0)
-    const picked = []
-    for (let i = 0; i < 2; i++) {
-      picked.push(MUSIC_PLAYLISTS[(dayHash + i) % MUSIC_PLAYLISTS.length])
-    }
-    console.log(`[Music] 补充歌单: ${picked.join(', ')}`)
-    for (const pid of picked) {
-      const songs = await fetchPlaylistSongs(pid)
-      allSongs.push(...songs)
-      console.log(`[Music] 歌单 ${pid}: ${songs.length} 首`)
-    }
-  }
-
-  // 去重
-  const seen = new Set()
-  const unique = allSongs.filter(s => {
-    const key = s.name + '-' + s.artist
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-
-  musicCache.songs = unique
-  musicCache.updatedAt = Date.now()
-  musicCache.dayKey = today
-  console.log(`[Music] 总计 ${unique.length} 首可播放歌曲`)
-  return unique
-}
-
-// ---- 音频代理（绕过 CDN 防盗链）----
-const songUrlCache = new Map() // id -> { url, ts }
-
-app.get('/api/music/play/:id', async (req, res) => {
-  try {
-    const songId = req.params.id
-    const now = Date.now()
-
-    // URL 缓存 10 分钟
-    let audioUrl = null
-    const cached = songUrlCache.get(songId)
-    if (cached && now - cached.ts < 10 * 60 * 1000) {
-      audioUrl = cached.url
-    } else {
-      const headers = NETEASE_COOKIE ? { Cookie: NETEASE_COOKIE } : {}
-      const urlRes = await axios.get(`${NETEASE_API}/song/url/v1`, {
-        params: { id: songId, level: 'standard' },
-        headers,
-        timeout: 10000,
-      })
-      const data = urlRes.data?.data?.[0]
-      if (data?.url) {
-        audioUrl = data.url
-        songUrlCache.set(songId, { url: audioUrl, ts: now })
-      }
-    }
-
-    if (!audioUrl) {
-      return res.status(404).send('URL not found')
-    }
-
-    // 代理音频流
-    const audioRes = await axios.get(audioUrl, {
-      responseType: 'stream',
-      timeout: 15000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Referer': 'https://music.163.com/',
-      },
-    })
-
-    // 转发响应头
-    if (audioRes.headers['content-type']) res.set('Content-Type', audioRes.headers['content-type'])
-    if (audioRes.headers['content-length']) res.set('Content-Length', audioRes.headers['content-length'])
-    res.set('Accept-Ranges', 'bytes')
-    res.set('Cache-Control', 'public, max-age=600')
-
-    audioRes.data.pipe(res)
-  } catch (e) {
-    console.error(`[Music] 代理失败 ${req.params.id}:`, e.message)
-    res.status(500).send('Proxy error')
-  }
-})
-
-// 清理旧 URL 缓存
-setInterval(() => {
-  const now = Date.now()
-  for (const [k, v] of songUrlCache.entries()) {
-    if (now - v.ts > 10 * 60 * 1000) songUrlCache.delete(k)
-  }
-}, 5 * 60 * 1000)
-
-// ---- 歌词 API（去标点，标准 LRC）----
-app.get('/api/lyric', async (req, res) => {
-  try {
-    const { id } = req.query
-    if (!id) return res.type('text').send('')
-
-    const headers = NETEASE_COOKIE ? { Cookie: NETEASE_COOKIE } : {}
-    const lrcRes = await axios.get(`${NETEASE_API}/lyric`, {
-      params: { id },
-      headers,
-      timeout: 10000,
-    })
-    let lrc = lrcRes.data?.lrc?.lyric || ''
-    if (!lrc) return res.type('text').send('')
-
-    // 去除标点符号（保留时间标签和字母数字汉字）
-    lrc = lrc.split('\n').map(line => {
-      // 提取时间标签 [xx:xx.xx]
-      const match = line.match(/^(\[[\d:.]+\])(.*)$/)
-      if (!match) return line
-      const timeTag = match[1]
-      let text = match[2]
-      // 去除中英文标点
-      text = text.replace(/[，。！？、；：""''（）《》【】…—·,.!?;:'"()\[\]{}<>~`@#$%^&*_+=|\\/\-]/g, '')
-      return timeTag + text
-    }).join('\n')
-
-    res.type('text').send(lrc)
-  } catch (e) {
-    res.type('text').send('')
-  }
-})
-
-app.get('/api/meting', async (req, res) => {
-  try {
-    const songs = await getDailyPlaylist()
-    res.json(songs)
-  } catch (error) {
-    console.error('[Music] 错误:', error.message)
-    res.json([])
-  }
-})
-
-// 歌词代理（返回纯 LRC 文本，适配 APlayer lrcType: 3）
-app.get('/api/lyric', async (req, res) => {
-  try {
-    const { id } = req.query
-    if (!id) return res.status(400).send('')
-    const headers = NETEASE_COOKIE ? { Cookie: NETEASE_COOKIE } : {}
-    const lyricRes = await axios.get(`${NETEASE_API}/lyric`, {
-      params: { id },
-      headers,
-      timeout: 10000,
-    })
-    // 提取 LRC 文本并直接返回纯文本
-    const lrcText = lyricRes.data?.lrc?.lyric || ''
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-    res.send(lrcText)
-  } catch (error) {
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-    res.send('')
-  }
-})
-
-// 音频播放代理（实时获取新鲜 URL，解决缓存 URL 过期问题）
-app.get('/api/music/play/:id', async (req, res) => {
-  try {
-    const { id } = req.params
-    if (!id) return res.status(400).json({ error: '缺少 id' })
-    const headers = NETEASE_COOKIE ? { Cookie: NETEASE_COOKIE } : {}
-    const urlRes = await axios.get(`${NETEASE_API}/song/url/v1`, {
-      params: { id, level: 'standard' },
-      headers,
-      timeout: 10000,
-    })
-    const songData = (urlRes.data?.data || [])[0]
-    if (!songData?.url) {
-      console.error(`[Music] 歌曲 ${id} 无可用 URL`)
-      return res.status(404).json({ error: '歌曲暂不可用' })
-    }
-    // 302 重定向到真实 URL
-    res.redirect(302, songData.url)
-  } catch (error) {
-    console.error(`[Music] 播放代理失败:`, error.message)
-    res.status(500).json({ error: error.message })
-  }
-})
-
+// 音乐播放器 API
+const musicRoutes = require('./routes/music')
+app.use('/api', musicRoutes)
 
 // 健康检查
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })
 })
 
-// ==================== 看板娘聊天 ====================
+// 看板娘聊天
 registerChatAPI(app)
 registerVideoAnalysis(app)
+
+// Live2D 模型代理
+const live2dRoutes = require('./routes/live2d')
+app.use('/api/live2d', live2dRoutes)
 
 // ==================== 启动 ====================
 app.listen(PORT, () => {

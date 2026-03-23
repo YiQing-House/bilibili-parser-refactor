@@ -61,3 +61,17 @@ export async function getFavoriteVideos(folderId: number, page = 1) {
   const { data } = await api.get(`/api/bilibili/favorites/${folderId}`, { params: { page } })
   return data.data
 }
+
+/** 获取观看历史（cursor 分页） */
+export async function getHistory(max = 0, viewAt = 0) {
+  const params: any = {}
+  if (max) { params.max = max; params.view_at = viewAt }
+  const { data } = await api.get('/api/bilibili/history', { params })
+  return data.data
+}
+
+/** 获取点赞视频 */
+export async function getLikedVideos(page = 1) {
+  const { data } = await api.get('/api/bilibili/liked', { params: { page } })
+  return data.data
+}

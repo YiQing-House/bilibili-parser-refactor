@@ -14,9 +14,7 @@
 
       <!-- Actions -->
       <div class="header__actions">
-        <button class="icon-btn" @click="appStore.toggleTheme" :title="appStore.isDark ? '切换为亮色' : '切换为暗色'">
-          <i :class="appStore.isDark ? 'fas fa-sun' : 'fas fa-moon'"></i>
-        </button>
+
 
         <template v-if="authStore.isLoggedIn">
           <div class="user-pill">

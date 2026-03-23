@@ -19,19 +19,20 @@ export interface DownloadTask {
 }
 
 interface DownloadState {
-  tasks: Map<string, DownloadTask>
+  // [P3] Map → Record，确保 Vue 响应式系统完全追踪属性变化
+  tasks: Record<string, DownloadTask>
   panelOpen: boolean
 }
 
 export const useDownloadStore = defineStore('download', {
   state: (): DownloadState => ({
-    tasks: new Map(),
+    tasks: {},
     panelOpen: false,
   }),
 
   getters: {
     taskList(): DownloadTask[] {
-      return Array.from(this.tasks.values())
+      return Object.values(this.tasks)
     },
     activeCount(): number {
       return this.taskList.filter((t) =>
@@ -42,7 +43,7 @@ export const useDownloadStore = defineStore('download', {
       return this.taskList.filter((t) => t.status === 'completed').length
     },
     totalCount(): number {
-      return this.tasks.size
+      return Object.keys(this.tasks).length
     },
   },
 
@@ -60,7 +61,7 @@ export const useDownloadStore = defineStore('download', {
         stage: '提交任务中...',
         speed: '',
       }
-      this.tasks.set(taskId, task)
+      this.tasks[taskId] = task
 
       try {
         // 创建后端任务
@@ -72,7 +73,7 @@ export const useDownloadStore = defineStore('download', {
 
         task.backendTaskId = res.taskId
         task.stage = '任务已创建...'
-        this.tasks.set(taskId, { ...task })
+        this.tasks[taskId] = { ...task }
 
         // 开始轮询进度
         this.startPolling(taskId, res.taskId)
@@ -81,7 +82,7 @@ export const useDownloadStore = defineStore('download', {
       } catch (e: unknown) {
         task.status = 'error'
         task.stage = e instanceof Error ? e.message : '创建失败'
-        this.tasks.set(taskId, { ...task })
+        this.tasks[taskId] = { ...task }
         throw e
       }
     },
@@ -89,7 +90,7 @@ export const useDownloadStore = defineStore('download', {
     /** 轮询后端下载进度 */
     startPolling(frontendId: string, backendId: string) {
       const timer = setInterval(async () => {
-        const task = this.tasks.get(frontendId)
+        const task = this.tasks[frontendId]
         if (!task) {
           clearInterval(timer)
           return
@@ -138,27 +139,25 @@ export const useDownloadStore = defineStore('download', {
             updated.stage = '已取消'
           }
 
-          this.tasks.set(frontendId, updated)
+          this.tasks[frontendId] = updated
         } catch {
           // 轮询失败，继续尝试
         }
-      }, 800)
+      }, 2000) // [P2] 降低轮询频率 800ms → 2000ms
 
       // 保存 timer
-      const task = this.tasks.get(frontendId)
+      const task = this.tasks[frontendId]
       if (task) {
         task.pollingTimer = timer
-        this.tasks.set(frontendId, { ...task })
+        this.tasks[frontendId] = { ...task }
       }
 
       // 15 分钟超时
       setTimeout(() => {
-        const t = this.tasks.get(frontendId)
+        const t = this.tasks[frontendId]
         if (t && ['starting', 'downloading'].includes(t.status)) {
           clearInterval(timer)
-          t.status = 'error'
-          t.stage = '处理超时'
-          this.tasks.set(frontendId, { ...t })
+          this.tasks[frontendId] = { ...t, status: 'error', stage: '处理超时' }
         }
       }, 15 * 60 * 1000)
     },
@@ -182,7 +181,7 @@ export const useDownloadStore = defineStore('download', {
 
     /** 取消任务 */
     async cancelTask(taskId: string) {
-      const task = this.tasks.get(taskId)
+      const task = this.tasks[taskId]
       if (!task) return
 
       if (task.pollingTimer) {
@@ -195,16 +194,14 @@ export const useDownloadStore = defineStore('download', {
         } catch { /* ignore */ }
       }
 
-      task.status = 'cancelled'
-      task.stage = '已取消'
-      this.tasks.set(taskId, { ...task })
+      this.tasks[taskId] = { ...task, status: 'cancelled', stage: '已取消' }
     },
 
     /** 清除已完成/失败/取消的任务 */
     clearFinished() {
-      for (const [id, task] of this.tasks) {
+      for (const [id, task] of Object.entries(this.tasks)) {
         if (['completed', 'error', 'cancelled'].includes(task.status)) {
-          this.tasks.delete(id)
+          delete this.tasks[id]
         }
       }
     },

@@ -27,3 +27,8 @@ dist-ssr
 _run_*.py
 server/announcement.json
 server/sessions.json
+server/cache/
+server/downloads/
+server/logs/
+test_screenshots/
+test_cdn_result.txt

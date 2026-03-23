@@ -10,10 +10,27 @@ const fs = require('fs')
 const path = require('path')
 
 const LOGS_DIR = path.join(__dirname, 'logs')
+const LOG_RETENTION_DAYS = 90  // [P2] 保留最近 90 天日志
 
 if (!fs.existsSync(LOGS_DIR)) {
   fs.mkdirSync(LOGS_DIR, { recursive: true })
 }
+
+// [P2] 启动时清理过期日志，防止磁盘无限增长
+try {
+  const cutoff = Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000
+  const files = fs.readdirSync(LOGS_DIR).filter(f => f.endsWith('.json'))
+  let cleaned = 0
+  for (const f of files) {
+    const filePath = path.join(LOGS_DIR, f)
+    const stat = fs.statSync(filePath)
+    if (stat.mtimeMs < cutoff) {
+      fs.unlinkSync(filePath)
+      cleaned++
+    }
+  }
+  if (cleaned > 0) console.log(`[Analytics] 清理了 ${cleaned} 个过期日志文件（>${LOG_RETENTION_DAYS}天）`)
+} catch (e) { /* ignore */ }
 
 function today() { return new Date().toISOString().slice(0, 10) }
 

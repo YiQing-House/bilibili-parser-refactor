@@ -108,19 +108,39 @@
       <div class="range-btn" data-range="14" onclick="selectRange('14',this)">14天</div>
       <div class="range-btn" data-range="30" onclick="selectRange('30',this)">1个月</div>
       <div class="range-btn" data-range="90" onclick="selectRange('90',this)">3个月</div>
-      <div class="range-btn" data-range="180" onclick="selectRange('180',this)">半年</div>
-      <div class="range-btn" data-range="365" onclick="selectRange('365',this)">1年</div>
+      <div class="range-btn" data-range="180" onclick="selectRange('180',this)">6个月</div>
+      <div class="range-btn" data-range="365" onclick="selectRange('365',this)">12个月</div>
       <div class="range-btn" data-range="all" onclick="selectRange('all',this)">全部</div>
+    </div>
+
+    <!-- IP 遮挡开关 -->
+    <div style="padding:4px 24px;display:flex;align-items:center;gap:8px;font-size:0.8rem;color:#888">
+      <label style="cursor:pointer;display:flex;align-items:center;gap:6px">
+        <input type="checkbox" id="ipMaskToggle" checked onchange="toggleIPMask()" style="accent-color:#fb7299">
+        <span>IP 地址遮挡</span>
+      </label>
     </div>
 
     <!-- 概览卡片 -->
     <div class="grid" id="statsGrid"></div>
 
-    <!-- 趋势图 -->
-    <div class="section">
-      <div class="section-title" id="chartTitle">📈 24小时分布</div>
+    <!-- 逐日趋势图 -->
+    <div class="section" id="dailyChartSection" style="display:none">
+      <div class="section-title">📈 逐日趋势</div>
       <div class="chart-container">
-        <div class="chart-bar" id="mainChart"></div>
+        <div class="chart-bar" id="dailyChart"></div>
+        <div class="chart-legend">
+          <span><span class="legend-dot" style="background:#00a1d6"></span>访问</span>
+          <span><span class="legend-dot" style="background:#fb7299"></span>解析</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 24小时分布图 -->
+    <div class="section">
+      <div class="section-title">🕐 24小时分布</div>
+      <div class="chart-container">
+        <div class="chart-bar" id="hourlyChart"></div>
         <div class="chart-legend">
           <span><span class="legend-dot" style="background:#00a1d6"></span>访问</span>
           <span><span class="legend-dot" style="background:#fb7299"></span>解析</span>
@@ -192,12 +212,22 @@
         .then(d => { if (d.success) { currentData = d.data; render(d.data); } });
     }
 
+    let ipMasked = true;
+
+    function toggleIPMask() {
+      ipMasked = document.getElementById('ipMaskToggle').checked;
+      if (currentData) render(currentData);
+    }
+
     function render(data) {
       const isToday = currentRange === 'today';
       const rangeLabel = {
         'today': '今日', '3': '近3天', '7': '近7天', '14': '近14天',
-        '30': '近1个月', '90': '近3个月', '180': '近半年', '365': '近1年', 'all': '全部'
+        '30': '近1个月', '90': '近3个月', '180': '近6个月', '365': '近12个月', 'all': '全部'
       }[currentRange] || '';
+
+      // 获取总访问量（全部时间）
+      const totalDays = data.availableDates?.length || data.dateCount || 1;
 
       // 概览卡片
       document.getElementById('statsGrid').innerHTML = `
@@ -222,18 +252,23 @@
           <div class="label">日均访问</div>
           <div class="value">${data.dateCount ? Math.round(data.totalVisits / data.dateCount) : data.totalVisits}</div>
         </div>
+        <div class="stat-card">
+          <div class="label">日均解析</div>
+          <div class="value">${data.dateCount ? Math.round(data.totalDownloads / data.dateCount) : data.totalDownloads}</div>
+        </div>
       `;
 
-      // 图表
-      if (isToday || !data.dailyVisits || data.dailyVisits.length <= 1) {
-        // 24 小时分布
-        document.getElementById('chartTitle').textContent = '📈 24小时分布';
-        renderHourlyChart(data.hourlyVisits, data.hourlyDownloads);
-      } else {
-        // 逐日趋势
-        document.getElementById('chartTitle').textContent = '📈 逐日趋势';
+      // 逐日趋势图（多天时显示）
+      const dailySection = document.getElementById('dailyChartSection');
+      if (!isToday && data.dailyVisits && data.dailyVisits.length > 1) {
+        dailySection.style.display = 'block';
         renderDailyChart(data.dailyVisits);
+      } else {
+        dailySection.style.display = 'none';
       }
+
+      // 24小时分布图（始终显示）
+      renderHourlyChart(data.hourlyVisits, data.hourlyDownloads);
 
       // 下载记录
       renderTable('downloadTable', data.recentDownloads, d => `<tr>
@@ -241,7 +276,7 @@
         <td>${d.user === '游客' ? '<span class="tag tag-guest">游客</span>' : '<span class="tag tag-user">' + esc(d.user) + '</span>'}</td>
         <td title="${esc(d.video?.title)}">${esc(d.video?.title || '-')}</td>
         <td>${esc(d.video?.author || '-')}</td>
-        <td>${maskIP(d.ip)}</td>
+        <td class="ip-cell">${displayIP(d.ip)}</td>
         <td>${esc(d.device)}</td>
       </tr>`, 6);
 
@@ -251,7 +286,7 @@
         <td>${v.user === '游客' ? '<span class="tag tag-guest">游客</span>' : '<span class="tag tag-user">' + esc(v.user) + '</span>'}</td>
         <td>${esc(v.path)}</td>
         <td>${v.method}</td>
-        <td>${maskIP(v.ip)}</td>
+        <td class="ip-cell">${displayIP(v.ip)}</td>
         <td>${esc(v.device)}</td>
       </tr>`, 6);
 
@@ -281,7 +316,7 @@
           <div class="bar-label">${h}</div>
         </div>`;
       }
-      document.getElementById('mainChart').innerHTML = html;
+      document.getElementById('hourlyChart').innerHTML = html;
     }
 
     function renderDailyChart(dailyVisits) {
@@ -302,7 +337,7 @@
           <div class="bar-label">${label}</div>
         </div>`;
       }
-      document.getElementById('mainChart').innerHTML = html;
+      document.getElementById('dailyChart').innerHTML = html;
     }
 
     function renderTable(id, items, rowFn, colspan) {
@@ -332,6 +367,11 @@
       const parts = ip.split('.');
       if (parts.length === 4) return parts[0] + '.' + parts[1] + '.*.*';
       return ip.replace(/::.*/, '::***');
+    }
+
+    function displayIP(ip) {
+      if (!ip) return '-';
+      return ipMasked ? maskIP(ip) : esc(ip);
     }
 
     function esc(s) {

@@ -78,25 +78,83 @@ function showWaifuTips(text: string, duration = 6000) {
 
 // 角色切换打招呼
 let lastModelId = parseInt(localStorage.getItem('modelId') || '1')
-const CHARACTER_GREETINGS: Record<number, string> = {
-  1: '大家好~我是 Pio！有什么可以帮你的吗？(◕ᴗ◕✿)',
-  2: '22娘登场！准备好和我一起玩转B站了吗？(≧▽≦)',
-  3: '你好呀~33娘来陪你了，有什么需要帮忙的吗？(●\'◡\'●)',
-  4: '♪ 初音未来上线~今天想听什么歌呢？🎵',
-  5: '喵~小萝莉来啦！要不要摸摸我？🐱',
-  6: '「清风明月本无价，近水远山皆有情」——晴岚在此~ 🌸',
+let modelListCache: string[] = [] // 缓存模型列表
+
+// 启动时获取模型列表
+fetch('/api/live2d/model_list.json')
+  .then(r => r.json())
+  .then(data => { modelListCache = data.models || [] })
+  .catch(() => {})
+
+// 根据模型名生成问候语（保留原有经典问候 + 新模型动态生成）
+const CLASSIC_GREETINGS: Record<string, string> = {
+  'pio': '大家好~我是 Pio！有什么可以帮你的吗？(◕ᴗ◕✿)',
+  '22': '22娘登场！准备好和我一起玩转B站了吗？(≧▽≦)',
+  '33': '你好呀~33娘来陪你了，有什么需要帮忙的吗？(●\'◡\'●)',
+  'miku': '♪ 初音未来上线~今天想听什么歌呢？🎵',
+  'snow_miku': '❄️ 雪初音来啦~冬天也要一起唱歌哦~',
+  'rem': '蕾姆在此为主人效劳~ 💙',
+  'sagiri': '纱…纱雾才没有在偷看你呢…🎨',
+  'kurumi': '呵呵~狂三登场了哦，你的时间…可以给我吗？🕐',
+  'madoka': '大家好！我会努力保护大家的！✨',
+  'paimeng': '嘿！派蒙来啦~有好吃的吗？⭐',
+  'bronya': '布洛妮娅，准备就绪。🎮',
+  'Neptune': 'Nep-Nep! 涅普顿参上~打破第四面墙！🟣',
+  'terisa': '德丽莎世界第一可爱！🌟',
+  'umaru': '小埋回到家啦~有没有薯片？🐹',
+  'kanna': '康娜…想和你一起玩。🐉',
+  'platelet': '加油！大家请注意脚下！🩹',
+  'mikoto': '呐，不许叫我电击使！叫我美琴！⚡',
+  'kuroko': '黒子在此～姐姐大人~🌹',
+  'chino': '…欢迎光临。请问要来杯咖啡吗？☕',
+  'katou': '嗯，我来了。有什么事吗？🎀',
+  'mai': '你看得到我吗？…好吧，那就陪你坐一会。🐰',
+  'shizuku': '大家好，雫来了哦~ 💧',
+  'kobayaxi': '加班回来了…唉，来杯啤酒吧。💻',
+  'wa2000_6': '哼！才不是特意来帮你的呢！🍰',
+  'hk416_3401': 'HK416，准备完毕。目标已锁定。🔫',
+  'an94_3303': '…AK-12 在吗？❄️',
+  'ak12_3302': '嗯~今天也要好好相处哦 😌',
 }
+
+function getModelName(modelId: number): string {
+  if (modelListCache.length === 0) return ''
+  const idx = Math.max(0, modelId - 1)
+  const modelPath = modelListCache[idx] || ''
+  return modelPath.split('/').pop() || ''
+}
+
+function getModelGreeting(modelName: string): string {
+  const lower = modelName.toLowerCase()
+  // 精确匹配经典问候
+  if (CLASSIC_GREETINGS[lower]) return CLASSIC_GREETINGS[lower]
+  // 模糊匹配（少前武器型号等）
+  for (const [key, greeting] of Object.entries(CLASSIC_GREETINGS)) {
+    if (lower.includes(key) || key.includes(lower)) return greeting
+  }
+  // 通用问候
+  return `嗨~我是${modelName}，今天也请多关照！✨`
+}
+
 setInterval(() => {
   const currentId = parseInt(localStorage.getItem('modelId') || '1')
   if (currentId !== lastModelId) {
     lastModelId = currentId
-    const greeting = CHARACTER_GREETINGS[currentId] || '嗨~我换了个新形象，喜欢吗？✨'
+    const modelName = getModelName(currentId)
+    const greeting = getModelGreeting(modelName)
     showWaifuTips(greeting, 6000)
+    // 同步存储模型名供 useMascot 使用
+    if (modelName) localStorage.setItem('modelName', modelName)
   }
 }, 2000)
 
 function getCurrentModelId(): number {
   try { return parseInt(localStorage.getItem('modelId') || '1') } catch { return 1 }
+}
+function getCurrentModelName(): string {
+  // 优先从缓存获取，回退到 localStorage
+  const name = getModelName(getCurrentModelId())
+  return name || localStorage.getItem('modelName') || 'pio'
 }
 
 // ==================== 常驻聊天框 ====================
@@ -150,7 +208,7 @@ async function callAI(context: string, userMsg: string): Promise<string> {
       body: JSON.stringify({
         message: userMsg,
         context,
-        character: getCurrentModelId(),
+        character: getCurrentModelName(),
         history: chatHistory.slice(-10),
       }),
     })
@@ -161,7 +219,7 @@ async function callAI(context: string, userMsg: string): Promise<string> {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: userMsg, context,
-          character: getCurrentModelId(), history: chatHistory.slice(-10),
+          character: getCurrentModelName(), history: chatHistory.slice(-10),
         }),
       })
       const data = await fallbackResp.json()

@@ -12,8 +12,17 @@
       <div class="rr__title">{{ data.title }}</div>
       <div class="rr__meta">
         <span v-if="data.author"><i class="fas fa-user"></i> {{ data.author }}</span>
+        <span v-if="data.bvid"><i class="fas fa-hashtag"></i> {{ data.bvid }}</span>
+        <span v-if="pubdateText"><i class="fas fa-clock"></i> {{ pubdateText }}</span>
+      </div>
+      <div class="rr__stats">
         <span v-if="data.views != null"><i class="fas fa-play"></i> {{ fmt(data.views) }}</span>
         <span v-if="data.likes != null"><i class="fas fa-thumbs-up"></i> {{ fmt(data.likes) }}</span>
+        <span v-if="data.coins != null"><i class="fas fa-coins"></i> {{ fmt(data.coins) }}</span>
+        <span v-if="data.favorites != null"><i class="fas fa-star"></i> {{ fmt(data.favorites) }}</span>
+        <span v-if="data.shares != null"><i class="fas fa-share"></i> {{ fmt(data.shares) }}</span>
+        <span v-if="data.danmakus != null"><i class="fas fa-bars-staggered"></i> {{ fmt(data.danmakus) }}</span>
+        <span v-if="data.replies != null"><i class="fas fa-comment"></i> {{ fmt(data.replies) }}</span>
       </div>
     </div>
 
@@ -65,6 +74,12 @@ const durationText = computed(() => {
   return h > 0
     ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
     : `${m}:${String(s).padStart(2, '0')}`
+})
+
+const pubdateText = computed(() => {
+  if (!props.data.pubdate) return ''
+  const d = new Date(props.data.pubdate * 1000)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 })
 
 const maxQualityLabel = computed(() => {
@@ -192,6 +207,7 @@ function downloadDanmaku() {
     gap: 10px;
     color: #A2A7B0;
     font-size: 0.68rem;
+    margin-bottom: 2px;
 
     span {
       display: flex;
@@ -199,7 +215,23 @@ function downloadDanmaku() {
       gap: 3px;
       white-space: nowrap;
     }
-    i { font-size: 0.6rem; opacity: 0.7; }
+    i { font-size: 0.6rem; opacity: 0.7; transform: translateY(0.5px); }
+  }
+
+  &__stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: #8a8f99;
+    font-size: 0.64rem;
+
+    span {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      white-space: nowrap;
+    }
+    i { font-size: 0.58rem; opacity: 0.6; transform: translateY(0.5px); }
   }
 
   // ---------- 操作 ----------
@@ -247,12 +279,4 @@ function downloadDanmaku() {
   }
 }
 
-// 亮色模式
-[data-theme="light"] .rr {
-  background: rgba(0, 0, 0, 0.03);
-  border-color: rgba(0, 0, 0, 0.06);
-  &:hover { background: rgba(0, 0, 0, 0.06); }
-  .rr__title { color: #212121; }
-  .rr__meta { color: #666; }
-}
 </style>

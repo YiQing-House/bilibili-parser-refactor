@@ -36,14 +36,23 @@
         />
 
         <!-- 批量结果 -->
-        <template v-else-if="videoStore.hasBatchResults">
+        <template v-else-if="videoStore.hasBatchResults || videoStore.hasBatchErrors">
           <div class="drawer__batch-head">
-            <span>批量结果 · {{ videoStore.batchResults.length }} 个视频</span>
+            <span>批量结果 · {{ videoStore.batchSummary }}</span>
           </div>
           <ResultRow
-            v-for="(v, i) in videoStore.batchResults" :key="i"
+            v-for="(v, i) in videoStore.batchResults" :key="'ok-'+i"
             :data="v" @toast="handleToast"
           />
+          <!-- 失败条目 -->
+          <div v-for="(err, i) in videoStore.batchErrors" :key="'err-'+i" class="drawer__error-row">
+            <i class="fas fa-exclamation-circle"></i>
+            <span class="drawer__error-url" :title="err.url">{{ err.url.slice(0, 60) }}</span>
+            <span class="drawer__error-msg">{{ err.error }}</span>
+            <button v-if="err.retryable" class="drawer__error-retry" @click="videoStore.retryBatchError(i)">
+              <i class="fas fa-redo"></i> 重试
+            </button>
+          </div>
         </template>
       </div>
 
@@ -78,7 +87,7 @@ const toast = inject<(m: string, t: string) => void>('toast')
 
 
 const hasContent = computed(() =>
-  videoStore.isLoading || videoStore.error || videoStore.currentResult || videoStore.hasBatchResults
+  videoStore.isLoading || videoStore.error || videoStore.currentResult || videoStore.hasBatchResults || videoStore.hasBatchErrors
 )
 
 function handleToast(msg: string, type: string) { toast?.(msg, type) }
@@ -193,6 +202,47 @@ function retry() { const u = videoStore.inputUrl.trim(); if (u) videoStore.smart
   font-size: 0.72rem;
   cursor: pointer;
   &:hover { background: rgba(255, 255, 255, 0.12); }
+}
+
+// 批量失败条目
+.drawer__error-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(255, 80, 80, 0.08);
+  border-left: 3px solid #ff5050;
+  border-radius: 6px;
+  margin: 4px 0;
+  font-size: 0.78rem;
+
+  > i { color: #ff5050; flex-shrink: 0; }
+}
+.drawer__error-url {
+  color: #ccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+.drawer__error-msg {
+  color: #ff8a8a;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drawer__error-retry {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 80, 80, 0.3);
+  background: rgba(255, 80, 80, 0.1);
+  color: #ff8a8a;
+  font-size: 0.7rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  &:hover { background: rgba(255, 80, 80, 0.2); }
 }
 
 .drawer__batch-head {

@@ -194,6 +194,41 @@
     </div>
 
     <!-- Live2D 看板娘 -->
+    <!-- 覆盖 CDN waifu.css：扩大 canvas + 气泡不遮头 -->
+    <style>
+      /* 看板娘显示区域（保持原版 300x300，模型缩放由后端 layout 控制） */
+      /* 气泡移到看板娘上方，不遮挡头部 */
+      #waifu-tips {
+        position: absolute !important;
+        top: -10px !important;
+        left: 10px !important;
+        right: auto !important;
+        margin: 0 !important;
+        width: 280px !important;
+        max-height: 120px !important;
+        overflow-y: auto !important;
+        font-size: 13px !important;
+        line-height: 22px !important;
+        padding: 8px 12px !important;
+        background: rgba(255, 255, 255, 0.85) !important;
+        backdrop-filter: blur(10px) !important;
+        -webkit-backdrop-filter: blur(10px) !important;
+        border: 1px solid rgba(200, 170, 130, 0.4) !important;
+        border-radius: 14px !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08) !important;
+        transform: translateY(-100%) !important;
+        z-index: 10 !important;
+      }
+      /* 整体容器调整 */
+      #waifu {
+        z-index: 998 !important;
+      }
+      /* 工具栏适配新尺寸 */
+      #waifu-tool {
+        right: -5px !important;
+        top: 60px !important;
+      }
+    </style>
     <script>
       (function(){
         var base = 'https://fastly.jsdelivr.net/npm/live2d-widgets@1.0.0-rc.6/dist/';
@@ -206,7 +241,7 @@
           if (typeof initWidget === 'function') {
             initWidget({
               waifuPath: base + 'waifu-tips.json',
-              cdnPath: 'https://fastly.jsdelivr.net/gh/fghrsh/live2d_api/',
+              cdnPath: '/api/live2d/',
               cubism2Path: base + 'live2d.min.js',
               cubism5Path: 'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js',
               tools: ['hitokoto', 'asteroids', 'switch-model', 'switch-texture', 'photo', 'info', 'quit'],

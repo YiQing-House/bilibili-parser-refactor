@@ -23,8 +23,8 @@ function setContext(ctx: string) {
   ;(window as any).__waifuUserContext = ctx
 }
 
-function getCurrentModelId(): number {
-  try { return parseInt(localStorage.getItem('modelId') || '1') } catch { return 1 }
+function getCurrentModelName(): string {
+  return localStorage.getItem('modelName') || 'pio'
 }
 
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] }
@@ -108,6 +108,18 @@ async function fetchSubtitle(bvid: string, cid: number): Promise<string> {
   } catch { return '' }
 }
 
+async function fetchBiliAISummary(bvid: string, cid: number, upMid?: number): Promise<string> {
+  try {
+    let url = `/api/video/ai-summary?bvid=${bvid}&cid=${cid}`
+    if (upMid) url += `&up_mid=${upMid}`
+    console.log('[Mascot] Fetching B站AI总结:', url)
+    const resp = await fetch(url)
+    const data = await resp.json()
+    console.log('[Mascot] B站AI总结结果:', data.available ? '有' : '无', data.summary?.slice(0, 50))
+    return data.available ? (data.summary || '') : ''
+  } catch (e) { console.error('[Mascot] B站AI总结请求失败:', e); return '' }
+}
+
 // ==================== 联网视频分析 ====================
 async function analyzeVideo(videoUrl: string, title: string, subtitle?: string) {
   const startThink = (window as any).__waifuStartThinking
@@ -116,7 +128,7 @@ async function analyzeVideo(videoUrl: string, title: string, subtitle?: string) 
 
   try {
     // 如果有字幕就一起发给后端，让 AI 结合联网+字幕分析
-    const body: any = { videoUrl, title, character: getCurrentModelId() }
+    const body: any = { videoUrl, title, character: getCurrentModelName() }
     if (subtitle) body.subtitle = subtitle
 
     const resp = await fetch('/api/chat/video', {
@@ -210,22 +222,54 @@ export function useMascot() {
       }
     })
 
-    // ---- 解析视频 → 字幕+联网分析 ----
+    // ---- 解析视频 -> B站AI总结优先 -> 降级GLM ----
     watch(() => videoStore.currentResult, async (result, old) => {
       if (result && result !== old) {
-        setContext(`正在查看视频：${result.title}`)
+        setContext(`正在查看视频: ${result.title}`)
         showPreset(PRESET.parseSuccess)
 
-        // 先拉字幕，再联网分析（字幕辅助）
-        let subtitle = ''
+        console.log('[Mascot] 视频解析完成:', result.bvid, 'cid:', result.cid, 'authorMid:', (result as any).authorMid)
+
+        // 1. 优先拿 B 站官方 AI 总结
+        let biliSummary = ''
         if (result.bvid && result.cid) {
-          subtitle = await fetchSubtitle(result.bvid, result.cid)
+          biliSummary = await fetchBiliAISummary(result.bvid, result.cid, (result as any).authorMid)
+        } else {
+          console.warn('[Mascot] 缺少 bvid 或 cid，跳过 AI 总结')
         }
-        const videoUrl = result.bvid
-          ? `https://www.bilibili.com/video/${result.bvid}`
-          : (result.url || '')
-        if (videoUrl) {
-          analyzeVideo(videoUrl, result.title, subtitle || undefined)
+
+        if (biliSummary) {
+          // 有 B 站 AI 总结 -> 让看板娘用可爱语气复述
+          console.log('[Mascot] 命中B站AI总结，交给看板娘复述')
+          callAI(
+            '以下是B站对视频的AI总结。请用你的可爱语气，把这段总结转述给用户。保留关键信息，3-4句话。不要说根据AI总结这种话，直接说视频讲了什么。',
+            '视频标题: ' + result.title + '\nB站AI总结:\n' + biliSummary
+          )
+        } else {
+          // 2. 没有 B 站 AI 总结 -> 降级: 字幕 + 视频描述
+          console.log('[Mascot] 无B站AI总结，降级为字幕+描述分析')
+          let subtitle = ''
+          if (result.bvid && result.cid) {
+            subtitle = await fetchSubtitle(result.bvid, result.cid)
+          }
+          const desc = (result as any).description || ''
+
+          if (subtitle || desc) {
+            // 有字幕或描述 -> 直接让 AI 根据已有信息总结，不联网
+            let content = `视频标题: ${result.title}`
+            if (desc) content += `\n视频简介: ${desc}`
+            if (subtitle) content += `\n视频字幕:\n${subtitle.slice(0, 2000)}`
+            callAI(
+              '请根据以下视频的标题、简介和字幕内容，用可爱语气总结这个视频讲了什么。3-4句话。只能基于给出的信息，严禁编造。',
+              content
+            )
+          } else {
+            // 啥都没有 -> 只用标题简单评论
+            callAI(
+              '用户解析了一个B站视频，但没有字幕和AI总结。请根据视频标题猜测视频可能讲了什么，用可爱语气简单评论。2句话即可。要明确表示这只是根据标题的猜测。',
+              '视频标题: ' + result.title
+            )
+          }
         }
       }
     })
@@ -239,7 +283,7 @@ export function useMascot() {
     })
 
     // ---- 下载开始 ----
-    watch(() => downloadStore.tasks.size, (n, o) => {
+    watch(() => downloadStore.totalCount, (n, o) => {
       if (n > o) {
         setContext('正在下载视频')
         showPreset(PRESET.downloadStart)

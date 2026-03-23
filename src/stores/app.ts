@@ -56,23 +56,15 @@ export const useAppStore = defineStore('app', {
   },
 
   actions: {
-    setTheme(theme: 'light' | 'dark' | 'auto') {
-      this.theme = theme
+    setTheme() {
+      // 仅支持暗色主题
+      this.theme = 'dark'
       this.applyTheme()
     },
 
-    toggleTheme() {
-      if (this.isDark) {
-        this.setTheme('light')
-      } else {
-        this.setTheme('dark')
-      }
-    },
-
     applyTheme() {
-      const isDark = this.isDark
-      document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')
-      document.documentElement.style.colorScheme = isDark ? 'dark' : 'light'
+      document.documentElement.setAttribute('data-theme', 'dark')
+      document.documentElement.style.colorScheme = 'dark'
     },
 
     setQuality(qn: number) {

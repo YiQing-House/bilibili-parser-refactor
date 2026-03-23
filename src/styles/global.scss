@@ -83,22 +83,6 @@ textarea {
     }
   }
 
-  // 双层子 video（视频模式），绝对定位叠放
-  &__video {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    object-position: center;
-    opacity: 0;
-    transition: opacity var(--bg-fade-duration) ease-in-out;
-    pointer-events: none; // 防止视频拦截鼠标事件
-
-    &.active {
-      opacity: 1;
-    }
-  }
 
   &__overlay {
     position: fixed;
@@ -128,23 +112,7 @@ textarea {
   }
 }
 
-// 亮色主题遮罩
-[data-theme="light"] .bg-carousel__overlay {
-  background:
-    linear-gradient(
-      to top,
-      rgba(0, 0, 0, calc(var(--overlay-gradient-opacity) * 0.5)) 0%,
-      rgba(0, 0, 0, 0) 30%
-    ),
-    linear-gradient(
-      180deg,
-      rgba(244, 244, 244, 0.85) 0%,
-      rgba(244, 244, 244, 0.30) 18%,
-      rgba(244, 244, 244, 0.20) 50%,
-      rgba(244, 244, 244, 0.30) 78%,
-      rgba(244, 244, 244, 0.90) 100%
-    );
-}
+
 
 // ============================================================
 // 动画

@@ -66,5 +66,6 @@ export interface BatchResult {
     success: boolean
     data?: import('./video').VideoData
     error?: string
+    retryable?: boolean
   }>
 }

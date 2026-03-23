@@ -128,26 +128,43 @@ class MultiPlatformService {
     }
 
     /**
-     * 批量解析多个链接
+     * 批量解析多个链接（并发 + 超时 + 自动重试）
      */
     async parseMultiple(urls) {
-        const results = [];
+        const CONCURRENCY = 3;   // 每批并发数
+        const TIMEOUT = 15000;   // 单条超时 15s
+        const MAX_RETRY = 1;     // 失败重试 1 次
+        const results = new Array(urls.length);
 
-        for (const url of urls) {
-            try {
-                const result = await this.parseVideo(url.trim());
-                results.push({
-                    success: true,
-                    url: url,
-                    data: result
-                });
-            } catch (error) {
-                results.push({
-                    success: false,
-                    url: url,
-                    error: error.message
-                });
+        // 单条解析（带超时 + 重试）
+        const parseSingle = async (url, index) => {
+            for (let attempt = 0; attempt <= MAX_RETRY; attempt++) {
+                try {
+                    const result = await Promise.race([
+                        this.parseVideo(url.trim()),
+                        new Promise((_, reject) =>
+                            setTimeout(() => reject(new Error('解析超时')), TIMEOUT)
+                        )
+                    ]);
+                    results[index] = { success: true, url, data: result };
+                    return;
+                } catch (error) {
+                    if (attempt === MAX_RETRY) {
+                        results[index] = {
+                            success: false,
+                            url,
+                            error: error.message,
+                            retryable: !error.message.includes('不支持')
+                        };
+                    }
+                }
             }
+        };
+
+        // 分批并发执行
+        for (let i = 0; i < urls.length; i += CONCURRENCY) {
+            const batch = urls.slice(i, i + CONCURRENCY);
+            await Promise.all(batch.map((url, j) => parseSingle(url, i + j)));
         }
 
         return results;
