@@ -137,7 +137,7 @@ if (fs.existsSync(distPath)) {
   console.log('[PROD] 检测到 dist/ 目录，启用静态文件托管')
   app.use(express.static(distPath))
   // SPA 回退：所有非 API 路由返回 index.html
-  app.get('*', (req, res) => {
+  app.get('/{*splat}', (req, res) => {
     if (!req.path.startsWith('/api') && !req.path.startsWith('/admin')) {
       res.sendFile(path.join(distPath, 'index.html'))
     }
