@@ -39,11 +39,9 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import LoginModal from '@/components/common/LoginModal.vue'
 
-const appStore = useAppStore()
 const authStore = useAuthStore()
 const showLoginModal = ref(false)
 const isScrolled = ref(false)

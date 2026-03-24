@@ -32,3 +32,4 @@ server/downloads/
 server/logs/
 test_screenshots/
 test_cdn_result.txt
+ann_history.txt

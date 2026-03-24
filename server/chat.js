@@ -226,7 +226,8 @@ function registerChatAPI(app) {
       const glmModel = process.env.GLM_MODEL || 'glm-4.5-air'
 
       if (apiKey) {
-        const reply = await callGLM(apiKey, glmModel, message, context, history, profile)
+        const processedHistory = await summarizeIfNeeded(apiKey, glmModel, history)
+        const reply = await callGLM(apiKey, glmModel, message, context, processedHistory, profile)
         return res.json({ success: true, reply })
       }
 
@@ -289,6 +290,11 @@ function registerChatAPI(app) {
       res.setHeader('Cache-Control', 'no-cache')
       res.setHeader('Connection', 'keep-alive')
 
+      // 客户端断开时销毁上游流
+      req.on('close', () => {
+        resp.data.destroy()
+      })
+
       let buffer = ''
       resp.data.on('data', (chunk) => {
         buffer += chunk.toString()
@@ -340,9 +346,8 @@ async function callGLM(apiKey, glmModel, message, context, history, profile) {
 
   const messages = [{ role: 'system', content: systemPrompt }]
 
-  const processedHistory = await summarizeIfNeeded(apiKey, glmModel, history)
-  if (processedHistory && Array.isArray(processedHistory)) {
-    for (const h of processedHistory.slice(-8)) {
+  if (history && Array.isArray(history)) {
+    for (const h of history.slice(-8)) {
       messages.push({ role: h.role, content: h.content })
     }
   }
@@ -410,6 +415,11 @@ function registerVideoAnalysis(app) {
       res.setHeader('Content-Type', 'text/event-stream')
       res.setHeader('Cache-Control', 'no-cache')
       res.setHeader('Connection', 'keep-alive')
+
+      // 客户端断开时销毁上游流
+      req.on('close', () => {
+        resp.data.destroy()
+      })
 
       let buffer = ''
       resp.data.on('data', (chunk) => {

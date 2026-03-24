@@ -12,7 +12,6 @@ interface AppState {
   videoFormat: string
   audioFormat: string
   filenameFormat: 'title' | 'title-author' | 'author-title'
-  settingsSidebarOpen: boolean
 }
 
 export const useAppStore = defineStore('app', {
@@ -23,7 +22,6 @@ export const useAppStore = defineStore('app', {
     videoFormat: 'mp4',
     audioFormat: 'mp3',
     filenameFormat: 'title',
-    settingsSidebarOpen: false,
   }),
 
   getters: {
@@ -75,17 +73,14 @@ export const useAppStore = defineStore('app', {
       this.format = format
     },
 
-    toggleSettings() {
-      this.settingsSidebarOpen = !this.settingsSidebarOpen
-    },
-
     initThemeListener() {
       const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-      mediaQuery.addEventListener('change', () => {
+      const onThemeChange = () => {
         if (this.theme === 'auto') {
           this.applyTheme()
         }
-      })
+      }
+      mediaQuery.addEventListener('change', onThemeChange)
       this.applyTheme()
     },
   },

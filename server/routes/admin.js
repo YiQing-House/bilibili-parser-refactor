@@ -24,7 +24,9 @@ function readAnnouncements() {
 }
 
 function writeAnnouncements(list) {
-  fs.writeFileSync(ANNOUNCEMENT_FILE, JSON.stringify(list, null, 2), 'utf-8')
+  fs.writeFile(ANNOUNCEMENT_FILE, JSON.stringify(list, null, 2), 'utf-8', (err) => {
+    if (err) console.error('[Announcement] write error:', err.message)
+  })
 }
 
 // 公开接口：获取启用通告

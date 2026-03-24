@@ -40,8 +40,8 @@ const BILIBILI_HEADERS = {
 // ==================== 下载进度追踪（模块化）====================
 const ProgressTracker = require('./shared/progressTracker')
 const downloadProgress = new ProgressTracker()
-// 向 bilibiliService 注入进度更新函数（替代 global 污染）
-global.updateDownloadProgress = (taskId, data) => downloadProgress.update(taskId, data)
+// 注入进度追踪器到 service 层（彻底消除 global 污染）
+bilibiliService.setProgressTracker(downloadProgress)
 
 // 持久化会话存储（JSON 文件，重启不丢失）
 const loginSessions = new SessionStore()
@@ -130,8 +130,7 @@ app.get('/api/bilibili/qrcode/check', async (req, res) => {
       `https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=${key}`,
       {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Referer': 'https://www.bilibili.com/',
+          ...BILIBILI_HEADERS,
         },
       }
     )
@@ -231,9 +230,8 @@ app.get('/api/bilibili/userinfo', async (req, res) => {
     const session = loginSessions.get(sessionId)
     const { cookies } = session
     const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      ...BILIBILI_HEADERS,
       'Cookie': `SESSDATA=${cookies.SESSDATA}; bili_jct=${cookies.bili_jct}; DedeUserID=${cookies.DedeUserID}`,
-      'Referer': 'https://www.bilibili.com/',
     }
 
     // 并发请求 nav（个人信息）和 upstat（获赞数）
@@ -533,8 +531,10 @@ app.post('/api/parse', async (req, res) => {
       cookies = loginSessions.get(sessionId).cookies
     }
 
-    // B站视频解析
-    if (url.includes('bilibili.com') || url.includes('b23.tv')) {
+    // B站视频解析（支持完整链接 / 纯BV号 / 纯AV号 / b23.tv / btv 短链）
+    const isBiliUrl = /bilibili\.com|b23\.tv|bili2233\.cn|bili22\.cn|bili23\.cn|btv/i.test(url)
+    const isBareId = /^(BV[a-zA-Z0-9]{10,}|av\d+)$/i.test(url.trim())
+    if (isBiliUrl || isBareId) {
       const result = await parseBilibiliVideo(url, cookies)
       // 记录解析行为
       logDownload(req, { ...result, url }, loginSessions)
@@ -558,18 +558,41 @@ async function parseBilibiliVideo(url, cookies) {
     headers['Cookie'] = `SESSDATA=${cookies.SESSDATA}; bili_jct=${cookies.bili_jct}; DedeUserID=${cookies.DedeUserID}`
   }
 
-  // 处理短链接
-  let finalUrl = url
-  if (url.includes('b23.tv')) {
-    const resp = await axios.get(url, { maxRedirects: 5, headers })
-    finalUrl = resp.request.res.responseUrl || url
+  // 处理短链接（b23.tv / btv / bili22 等）
+  let finalUrl = url.trim()
+  if (/b23\.tv|btv|bili2233\.cn|bili22\.cn|bili23\.cn/i.test(finalUrl)) {
+    // 确保有协议前缀
+    if (!/^https?:\/\//i.test(finalUrl)) finalUrl = 'https://' + finalUrl
+    const resp = await axios.get(finalUrl, { maxRedirects: 5, headers, timeout: 8000 })
+    finalUrl = resp.request.res.responseUrl || finalUrl
   }
 
-  // 提取 BV 号
-  const bvMatch = finalUrl.match(/BV[a-zA-Z0-9]+/)
-  if (!bvMatch) throw new Error('无法从链接中提取视频ID')
+  // 纯 BV/AV 号补全为完整链接
+  const bareIdMatch = finalUrl.match(/^(BV[a-zA-Z0-9]{10,})$/i)
+  if (bareIdMatch) {
+    finalUrl = `https://www.bilibili.com/video/${bareIdMatch[1]}`
+  }
+  const bareAvMatch = finalUrl.match(/^av(\d+)$/i)
+  if (bareAvMatch) {
+    finalUrl = `https://www.bilibili.com/video/av${bareAvMatch[1]}`
+  }
 
-  const bvid = bvMatch[0]
+  // 提取 BV 号或 AV 号
+  const bvMatch = finalUrl.match(/BV[a-zA-Z0-9]+/i)
+  const avMatch = !bvMatch && finalUrl.match(/av(\d+)/i)
+
+  let bvid
+  if (bvMatch) {
+    bvid = bvMatch[0]
+  } else if (avMatch) {
+    // AV 号转 BV 号：通过 B站 API 查询
+    const avInfo = await axios.get(`https://api.bilibili.com/x/web-interface/view?aid=${avMatch[1]}`, { headers, timeout: 8000 })
+    if (avInfo.data.code !== 0) throw new Error(avInfo.data.message || 'AV号查询失败')
+    bvid = avInfo.data.data.bvid
+    if (!bvid) throw new Error('AV号转换BV号失败')
+  } else {
+    throw new Error('无法从链接中提取视频ID')
+  }
 
   // 获取视频信息
   const infoRes = await axios.get(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, { headers })
@@ -641,7 +664,7 @@ app.get('/api/bilibili/download', async (req, res) => {
     if (sessionId && loginSessions.has(sessionId)) cookies = loginSessions.get(sessionId).cookies
 
     const taskId = `download_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    updateDownloadProgress(taskId, { status: 'starting', percent: 0, stage: '准备中...', videoPercent: 0, audioPercent: 0 })
+    downloadProgress.set(taskId, { status: 'starting', percent: 0, stage: '准备中...', videoPercent: 0, audioPercent: 0 })
     await bilibiliService.downloadWithQuality(url, parseInt(qn), cookies, res, format, nameFormat, taskId)
   } catch (error) {
     console.error('[Download] 错误:', error.message)
@@ -678,14 +701,14 @@ app.post('/api/bilibili/download-task', async (req, res) => {
     if (sessionId && loginSessions.has(sessionId)) cookies = loginSessions.get(sessionId).cookies
 
     const taskId = `download_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    updateDownloadProgress(taskId, { status: 'starting', percent: 0, stage: '准备中...', videoPercent: 0, audioPercent: 0 })
+    downloadProgress.set(taskId, { status: 'starting', percent: 0, stage: '准备中...', videoPercent: 0, audioPercent: 0 })
     res.json({ success: true, taskId })
 
     bilibiliService.downloadWithQualityAsync(url, parseInt(qn), cookies, format, nameFormat, taskId)
       .then((filePath) => {
         const currentProgress = downloadProgress.get(taskId)
         if (!currentProgress || currentProgress.status !== 'completed') {
-          updateDownloadProgress(taskId, {
+          downloadProgress.set(taskId, {
             status: 'completed', percent: 100, stage: '下载完成', filePath,
             fileName: path.basename(filePath),
             downloadUrl: `/api/download-file/${encodeURIComponent(path.basename(filePath))}`,
@@ -693,7 +716,7 @@ app.post('/api/bilibili/download-task', async (req, res) => {
         }
       })
       .catch((error) => {
-        updateDownloadProgress(taskId, { status: 'error', percent: 0, stage: '下载失败', error: error.message })
+        downloadProgress.set(taskId, { status: 'error', percent: 0, stage: '下载失败', error: error.message })
       })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
@@ -717,8 +740,8 @@ app.get('/api/download-file/:filename', (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
     const fileStream = fs.createReadStream(filePath)
     fileStream.pipe(res)
-    // [P3] 延长删除延时 5s→60s 避免慢速传输被截断
-    res.on('close', () => { setTimeout(() => { try { fs.unlinkSync(filePath) } catch {} }, 60000) })
+    // [P2] 传输完成后延迟 5 分钟删除，避免慢速网络截断
+    res.on('finish', () => { setTimeout(() => { try { fs.unlinkSync(filePath) } catch {} }, 300000) })
   } catch (error) {
     res.status(500).json({ success: false, error: error.message })
   }
@@ -809,7 +832,7 @@ app.get('/api/proxy/image', async (req, res) => {
     const { url } = req.query
     if (!url) return res.status(400).send('Missing url parameter')
     const response = await axios({ method: 'GET', url, responseType: 'stream', timeout: 10000,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Referer': 'https://www.bilibili.com/', 'Accept': 'image/*,*/*' }
+      headers: { ...BILIBILI_HEADERS, 'Accept': 'image/*,*/*' }
     })
     res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg')
     res.setHeader('Cache-Control', 'public, max-age=86400')
@@ -852,12 +875,11 @@ app.get('/api/download/redirect', async (req, res) => {
       bvid: result.bvid,
       cid: result.cid,
       qn: qn,
-      fnval: 16,  // DASH 格式
+      fnval: 4048,  // DASH + HDR + 4K + AV1 + 8K（与其他 playurl 统一）
       fourk: 1,
     }
     const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Referer': 'https://www.bilibili.com/',
+      ...BILIBILI_HEADERS,
     }
     if (cookies) {
       headers['Cookie'] = typeof cookies === 'string'
@@ -922,7 +944,7 @@ app.get('/api/download', async (req, res) => {
     }
     const videoFilename = filename || `video_${Date.now()}.mp4`
     const response = await axios({ method: 'GET', url, responseType: 'stream', timeout: 300000, maxRedirects: 5,
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36', 'Accept': '*/*', 'Referer': 'https://www.bilibili.com/', 'Origin': 'https://www.bilibili.com' }
+      headers: { ...BILIBILI_HEADERS, 'Accept': '*/*', 'Origin': 'https://www.bilibili.com' }
     })
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(videoFilename)}"`)
     res.setHeader('Content-Type', response.headers['content-type'] || 'video/mp4')
@@ -1023,11 +1045,7 @@ app.get('/api/user/profile-analysis', async (req, res) => {
       return res.json({ success: false, error: '未登录' })
     }
     const cookies = loginSessions.get(sessionId).cookies
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Referer': 'https://www.bilibili.com/',
-      'Cookie': `SESSDATA=${cookies.SESSDATA}; bili_jct=${cookies.bili_jct}; DedeUserID=${cookies.DedeUserID}`,
-    }
+    const headers = getAuthHeaders(cookies)
 
     const results = { history: [], favorites: [], categories: {} }
 
@@ -1206,10 +1224,7 @@ app.get('/api/bilibili/danmaku/:cid', async (req, res) => {
     const { cid } = req.params
     const response = await axios.get(`https://comment.bilibili.com/${cid}.xml`, {
       responseType: 'arraybuffer',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://www.bilibili.com/',
-      },
+      headers: BILIBILI_HEADERS,
       decompress: true,
     })
     res.setHeader('Content-Type', 'application/xml; charset=utf-8')
@@ -1238,10 +1253,7 @@ app.get('/api/proxy/avatar', async (req, res) => {
     const response = await axios.get(url, {
       responseType: 'arraybuffer',
       timeout: 10000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Referer': 'https://www.bilibili.com/',
-      },
+      headers: BILIBILI_HEADERS,
     })
     res.set('Content-Type', response.headers['content-type'] || 'image/jpeg')
     res.set('Cache-Control', 'public, max-age=86400')

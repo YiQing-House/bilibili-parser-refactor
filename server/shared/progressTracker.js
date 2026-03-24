@@ -26,7 +26,7 @@ class ProgressTracker {
   }
 
   set(taskId, data) {
-    this._map.set(taskId, data)
+    this._map.set(taskId, { ...data, updatedAt: Date.now() })
   }
 
   has(taskId) {

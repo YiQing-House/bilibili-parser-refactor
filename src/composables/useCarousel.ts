@@ -31,6 +31,7 @@ export function useCarousel() {
 
   const isPaused = ref(false)
   const isLoading = ref(false)
+  const loadFailed = ref(false)
 
   // 向外暴露
   const currentBgUrl = ref('')
@@ -47,6 +48,9 @@ export function useCarousel() {
 
   // ==================== 切换逻辑 ====================
 
+  let retryCount = 0
+  const MAX_RETRIES = 5
+
   function loadNext() {
     if (isLoading.value) return
     isLoading.value = true
@@ -56,13 +60,19 @@ export function useCarousel() {
     img.src = url
 
     img.onload = () => {
+      retryCount = 0  // 成功加载，重置计数
       applyToInactiveLayer(url)
       isLoading.value = false
     }
 
     img.onerror = () => {
-      console.warn('背景图加载失败，跳过到下一张')
       isLoading.value = false
+      retryCount++
+      if (retryCount >= MAX_RETRIES) {
+        console.warn(`背景图连续 ${MAX_RETRIES} 次加载失败，停止重试`)
+        loadFailed.value = true
+        return
+      }
       setTimeout(() => loadNext(), 1000)
     }
   }
@@ -134,6 +144,7 @@ export function useCarousel() {
     currentBgUrl,
     isPaused,
     isLoading,
+    loadFailed,
     loadNext,
     pause,
     resume,

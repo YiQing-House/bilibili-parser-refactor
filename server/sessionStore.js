@@ -51,7 +51,7 @@ class SessionStore {
 
   /** [P2] 异步保存 + debounce，合并短时间内的多次写入 */
   _save() {
-    if (this._saveTimer) return  // 已有待执行的保存，跳过
+    if (this._saveTimer) clearTimeout(this._saveTimer)
     this._saveTimer = setTimeout(() => {
       this._saveTimer = null
       this._saveNow()

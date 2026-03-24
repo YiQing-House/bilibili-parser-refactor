@@ -75,6 +75,27 @@ function parseDevice(ua) {
   return os ? `${browser}/${os}` : browser
 }
 
+// [P1] 内存缓存当天日志，避免每请求读写磁盘
+let _cachedLog = null
+let _cachedDate = ''
+let _saveTimer = null
+
+function _getCachedLog(date) {
+  if (_cachedDate !== date || !_cachedLog) {
+    _cachedLog = readDayLog(date)
+    _cachedDate = date
+  }
+  return _cachedLog
+}
+
+function _debounceSave(date, log) {
+  if (_saveTimer) return
+  _saveTimer = setTimeout(() => {
+    _saveTimer = null
+    writeDayLog(date, log)
+  }, 1000)
+}
+
 function accessLogger(loginSessions) {
   return (req, res, next) => {
     const skip = ['/api/bilibili/qrcode/check', '/api/health', '/api/announcement', '/favicon.ico']
@@ -85,7 +106,7 @@ function accessLogger(loginSessions) {
     const ua = req.headers['user-agent'] || ''
     const device = parseDevice(ua)
     const date = today()
-    const log = readDayLog(date)
+    const log = _getCachedLog(date)
 
     log.visits.push({
       time: new Date().toISOString(),
@@ -94,7 +115,7 @@ function accessLogger(loginSessions) {
     })
     log.pageViews = (log.pageViews || 0) + 1
     if (!log.uniqueIPs.includes(ip)) log.uniqueIPs.push(ip)
-    writeDayLog(date, log)
+    _debounceSave(date, log)
     next()
   }
 }
@@ -110,7 +131,7 @@ function getUserFromReq(req, loginSessions) {
 
 function logDownload(req, videoInfo, loginSessions) {
   const date = today()
-  const log = readDayLog(date)
+  const log = _getCachedLog(date)
   const ip = getClientIP(req)
   log.downloads.push({
     time: new Date().toISOString(),
@@ -123,7 +144,7 @@ function logDownload(req, videoInfo, loginSessions) {
       url: videoInfo.url || '',
     },
   })
-  writeDayLog(date, log)
+  _debounceSave(date, log)
 }
 
 /** 获取日期范围内所有日期字符串 YYYY-MM-DD */

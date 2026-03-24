@@ -158,6 +158,11 @@ class YtdlpService {
             return JSON.parse(stdout);
         } catch (error) {
             throw new Error(`获取视频信息失败: ${error.message}`);
+        } finally {
+            // 清理临时 cookie 文件
+            if (cookieFile) {
+                try { fs.unlinkSync(cookieFile) } catch {}
+            }
         }
     }
 

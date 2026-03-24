@@ -20,12 +20,10 @@ function showTips(text: string, duration = 6000) {
 }
 
 function setContext(ctx: string) {
-  ;(window as any).__waifuUserContext = ctx
+  ; (window as any).__waifuUserContext = ctx
 }
 
-function getCurrentModelName(): string {
-  return localStorage.getItem('modelName') || 'pio'
-}
+
 
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] }
 
@@ -41,7 +39,7 @@ const PRESET = {
   parseSuccess: [
     '解析成功啦！快看看视频信息~ 📹',
     '搞定！视频信息出来了哦 ✨',
-    '完美解析！让 AI 帮你看看视频讲了什么~',
+    '完美解析！让本尊帮你看看视频讲了什么~',
   ],
   // 解析失败
   parseFail: [
@@ -112,63 +110,14 @@ async function fetchBiliAISummary(bvid: string, cid: number, upMid?: number): Pr
   try {
     let url = `/api/video/ai-summary?bvid=${bvid}&cid=${cid}`
     if (upMid) url += `&up_mid=${upMid}`
-    console.log('[Mascot] Fetching B站AI总结:', url)
     const resp = await fetch(url)
     const data = await resp.json()
-    console.log('[Mascot] B站AI总结结果:', data.available ? '有' : '无', data.summary?.slice(0, 50))
     return data.available ? (data.summary || '') : ''
   } catch (e) { console.error('[Mascot] B站AI总结请求失败:', e); return '' }
 }
 
-// ==================== 联网视频分析 ====================
-async function analyzeVideo(videoUrl: string, title: string, subtitle?: string) {
-  const startThink = (window as any).__waifuStartThinking
-  const stopThink = (window as any).__waifuStopThinking
-  if (startThink) startThink()
 
-  try {
-    // 如果有字幕就一起发给后端，让 AI 结合联网+字幕分析
-    const body: any = { videoUrl, title, character: getCurrentModelName() }
-    if (subtitle) body.subtitle = subtitle
 
-    const resp = await fetch('/api/chat/video', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-
-    if (!resp.ok || !resp.body) { showTips('视频分析失败了…😥'); return }
-
-    const reader = resp.body.getReader()
-    const decoder = new TextDecoder()
-    let fullReply = ''
-    let buffer = ''
-
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        try {
-          const data = JSON.parse(line.slice(6))
-          if (data.done) break
-          if (data.content) {
-            fullReply += data.content
-            const t = fullReply.length > 150 ? fullReply.slice(0, 150) + '…' : fullReply
-            showTips(t, 15000)
-          }
-        } catch { /* skip */ }
-      }
-    }
-    if (fullReply) {
-      showTips(fullReply.length > 150 ? fullReply.slice(0, 150) + '…' : fullReply, 10000)
-    }
-  } catch { showTips('网络出问题了…😥') }
-  finally { if (stopThink) stopThink() }
-}
 
 // ==================== 冷却控制 ====================
 let lastPresetTime = 0
@@ -228,31 +177,29 @@ export function useMascot() {
         setContext(`正在查看视频: ${result.title}`)
         showPreset(PRESET.parseSuccess)
 
-        console.log('[Mascot] 视频解析完成:', result.bvid, 'cid:', result.cid, 'authorMid:', (result as any).authorMid)
+
 
         // 1. 优先拿 B 站官方 AI 总结
         let biliSummary = ''
         if (result.bvid && result.cid) {
-          biliSummary = await fetchBiliAISummary(result.bvid, result.cid, (result as any).authorMid)
+          biliSummary = await fetchBiliAISummary(result.bvid, result.cid, result.authorMid)
         } else {
           console.warn('[Mascot] 缺少 bvid 或 cid，跳过 AI 总结')
         }
 
         if (biliSummary) {
           // 有 B 站 AI 总结 -> 让看板娘用可爱语气复述
-          console.log('[Mascot] 命中B站AI总结，交给看板娘复述')
           callAI(
             '以下是B站对视频的AI总结。请用你的可爱语气，把这段总结转述给用户。保留关键信息，3-4句话。不要说根据AI总结这种话，直接说视频讲了什么。',
             '视频标题: ' + result.title + '\nB站AI总结:\n' + biliSummary
           )
         } else {
           // 2. 没有 B 站 AI 总结 -> 降级: 字幕 + 视频描述
-          console.log('[Mascot] 无B站AI总结，降级为字幕+描述分析')
           let subtitle = ''
           if (result.bvid && result.cid) {
             subtitle = await fetchSubtitle(result.bvid, result.cid)
           }
-          const desc = (result as any).description || ''
+          const desc = result.description || ''
 
           if (subtitle || desc) {
             // 有字幕或描述 -> 直接让 AI 根据已有信息总结，不联网

@@ -96,6 +96,10 @@
     <div class="topbar">
       <h1>📊 数据看板</h1>
       <div class="topbar-right">
+        <span id="lastRefresh" style="font-size:0.75rem;color:#666;"></span>
+        <label style="font-size:0.8rem;color:#888;display:flex;align-items:center;gap:4px;cursor:pointer;">
+          <input type="checkbox" id="autoRefreshToggle" checked onchange="toggleAutoRefresh()"> 自动刷新
+        </label>
         <a href="/admin">← 通告管理</a>
       </div>
     </div>
@@ -387,6 +391,27 @@
       document.querySelector(`#tab-${name}`).classList.add('active');
       btn.classList.add('active');
     }
+
+    // [#12] 自动刷新（30秒）
+    let autoRefreshTimer = null;
+    function updateRefreshTime() {
+      const el = document.getElementById('lastRefresh');
+      if (el) el.textContent = '刷新: ' + new Date().toLocaleTimeString('zh-CN');
+    }
+    function doAutoRefresh() {
+      if (!pwd || !currentRange) return;
+      const param = currentRange === 'today' ? 'range=today' : (currentRange === 'all' ? 'range=all' : 'range=' + currentRange);
+      fetch('/api/admin/stats?password=' + encodeURIComponent(pwd) + '&' + param)
+        .then(r => r.json())
+        .then(d => { if (d.success) { currentData = d.data; render(d.data); updateRefreshTime(); } });
+    }
+    function toggleAutoRefresh() {
+      const on = document.getElementById('autoRefreshToggle').checked;
+      if (on) { autoRefreshTimer = setInterval(doAutoRefresh, 30000); }
+      else { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+    }
+    // 首次启动自动刷新
+    autoRefreshTimer = setInterval(doAutoRefresh, 30000);
   </script>
 </body>
 </html>

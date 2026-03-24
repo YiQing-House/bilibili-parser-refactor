@@ -39,11 +39,20 @@
         <template v-else-if="videoStore.hasBatchResults || videoStore.hasBatchErrors">
           <div class="drawer__batch-head">
             <span>批量结果 · {{ videoStore.batchSummary }}</span>
+            <button v-if="videoStore.batchResults.length" class="drawer__batch-dl" @click="downloadAll">
+              <i class="fas fa-download"></i> 全部下载
+            </button>
           </div>
           <ResultRow
-            v-for="(v, i) in videoStore.batchResults" :key="'ok-'+i"
+            v-for="(v, i) in pagedBatchResults" :key="'ok-'+i"
             :data="v" @toast="handleToast"
           />
+          <!-- 分页控件 -->
+          <div v-if="batchTotalPages > 1" class="drawer__pager">
+            <button :disabled="batchPage <= 1" @click="batchPage--">◀</button>
+            <span>{{ batchPage }} / {{ batchTotalPages }}</span>
+            <button :disabled="batchPage >= batchTotalPages" @click="batchPage++">▶</button>
+          </div>
           <!-- 失败条目 -->
           <div v-for="(err, i) in videoStore.batchErrors" :key="'err-'+i" class="drawer__error-row">
             <i class="fas fa-exclamation-circle"></i>
@@ -75,6 +84,9 @@
 import { ref, computed } from 'vue'
 import { inject } from 'vue'
 import { useVideoStore } from '@/stores/video'
+import { useDownloadStore } from '@/stores/download'
+import { useAppStore } from '@/stores/app'
+import { QUALITY_MAP } from '@/types/video'
 import SearchBox from '@/components/video/SearchBox.vue'
 import ResultRow from '@/components/video/ResultRow.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
@@ -82,6 +94,8 @@ import LoginModal from '@/components/common/LoginModal.vue'
 import AppFooter from '@/components/layout/AppFooter.vue'
 
 const videoStore = useVideoStore()
+const downloadStore = useDownloadStore()
+const appStore = useAppStore()
 const showLogin = ref(false)
 const toast = inject<(m: string, t: string) => void>('toast')
 
@@ -89,6 +103,42 @@ const toast = inject<(m: string, t: string) => void>('toast')
 const hasContent = computed(() =>
   videoStore.isLoading || videoStore.error || videoStore.currentResult || videoStore.hasBatchResults || videoStore.hasBatchErrors
 )
+
+// 批量结果分页
+const BATCH_PAGE_SIZE = 20
+const batchPage = ref(1)
+const batchTotalPages = computed(() => Math.max(1, Math.ceil(videoStore.batchResults.length / BATCH_PAGE_SIZE)))
+const pagedBatchResults = computed(() => {
+  const start = (batchPage.value - 1) * BATCH_PAGE_SIZE
+  return videoStore.batchResults.slice(start, start + BATCH_PAGE_SIZE)
+})
+
+function sanitize(s: string) { return s.replace(/[<>:"/\\|?*]/g, '_') }
+
+/** 全部下载：遍历批量结果，逐个创建下载任务（最多20个） */
+function downloadAll() {
+  const results = videoStore.batchResults
+  if (!results.length) return
+  const MAX_BATCH_DOWNLOAD = 20
+  const toDownload = results.slice(0, MAX_BATCH_DOWNLOAD)
+  const qn = appStore.quality
+  let created = 0
+  for (const v of toDownload) {
+    const url = v.url || (v.bvid ? `https://www.bilibili.com/video/${v.bvid}` : '')
+    if (!url) continue
+    const maxQ = v.maxQuality || 80
+    const actualQn = qn > maxQ ? maxQ : qn
+    const qName = QUALITY_MAP[actualQn] || String(actualQn)
+    const fname = `${qName}_${sanitize(v.title || 'video')}.mp4`
+    downloadStore.createTask(url, fname, actualQn, appStore.videoFormat)
+    created++
+  }
+  if (created > 0) {
+    downloadStore.panelOpen = true
+    const extra = results.length > MAX_BATCH_DOWNLOAD ? `（仅前 ${MAX_BATCH_DOWNLOAD} 个）` : ''
+    toast?.(`已创建 ${created} 个下载任务${extra}`, 'success')
+  }
+}
 
 function handleToast(msg: string, type: string) { toast?.(msg, type) }
 function retry() { const u = videoStore.inputUrl.trim(); if (u) videoStore.smartParse(u) }
@@ -255,6 +305,20 @@ function retry() { const u = videoStore.inputUrl.trim(); if (u) videoStore.smart
   font-weight: 600;
 }
 
+.drawer__batch-dl {
+  padding: 4px 12px;
+  background: linear-gradient(135deg, #fb7299, #e91e63);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex; align-items: center; gap: 4px;
+  &:hover { opacity: 0.85; transform: translateY(-1px); }
+  i { font-size: 0.7rem; }
+}
+
 // 搜索栏区域 — 覆盖子组件样式让其融入抽屉
 .drawer__search {
   padding: 4px 0 0;
@@ -299,6 +363,33 @@ function retry() { const u = videoStore.inputUrl.trim(); if (u) videoStore.smart
   text-align: center;
   padding: 4px 0;
   z-index: 50;
+}
+
+// =================== 分页控件 ===================
+.drawer__pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 0 4px;
+  font-size: 12px;
+  color: #A2A7B0;
+
+  button {
+    width: 28px; height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.05);
+    color: #ddd;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    &:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
+    &:disabled { opacity: 0.3; cursor: not-allowed; }
+  }
 }
 
 // =================== 响应式 ===================

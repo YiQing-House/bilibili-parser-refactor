@@ -31,20 +31,44 @@
       <button class="rr__dl" @click="handleDownload" :title="appStore.formatLabel + '下载'">
         <i class="fas fa-download"></i>
       </button>
+      <button class="rr__btn" @click="copyDirectLink" title="复制直链">
+        <i class="fas fa-link"></i>
+      </button>
       <button v-if="coverSrc" class="rr__btn" @click="downloadCover" title="封面"><i class="fas fa-image"></i></button>
       <button v-if="data.cid" class="rr__btn" @click="downloadDanmaku" title="弹幕"><i class="fas fa-bars-staggered"></i></button>
+      <button v-if="isMultiP" class="rr__btn" @click="pagesExpanded = !pagesExpanded" :title="pagesExpanded ? '收起分P' : '展开分P'">
+        <i :class="pagesExpanded ? 'fas fa-chevron-up' : 'fas fa-list-ol'"></i>
+      </button>
+    </div>
+
+    <!-- 多 P 分集列表 -->
+    <div v-if="isMultiP && pagesExpanded" class="rr__pages">
+      <div class="rr__pages-head">
+        <span>分P列表（共{{ data.pages!.length }}P）</span>
+        <button class="rr__pages-dlall" @click="handleDownloadAllPages" title="下载全部P">
+          <i class="fas fa-download"></i> 全部下载
+        </button>
+      </div>
+      <div v-for="p in data.pages" :key="p.cid" class="rr__page-item">
+        <span class="rr__page-num">P{{ p.page }}</span>
+        <span class="rr__page-title">{{ p.part }}</span>
+        <span class="rr__page-dur">{{ fmtDur(p.duration) }}</span>
+        <button class="rr__page-dl" @click="handleDownloadPage(p)" title="下载此P">
+          <i class="fas fa-download"></i>
+        </button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { VideoData } from '@/types/video'
 import { QUALITY_MAP } from '@/types/video'
 import { useAppStore } from '@/stores/app'
 import { useDownloadStore } from '@/stores/download'
 import { useVideoStore } from '@/stores/video'
-import { buildCoverUrl, buildStreamUrl } from '@/services/bilibili'
+import { buildCoverUrl, buildStreamUrl, buildDownloadUrl } from '@/services/bilibili'
 
 const props = defineProps<{ data: VideoData }>()
 const emit = defineEmits<{ (e: 'toast', msg: string, type: string): void }>()
@@ -126,17 +150,71 @@ function downloadCover() {
   emit('toast', '封面下载已开始', 'success')
 }
 
+/** 复制视频直链到剪贴板 */
+function copyDirectLink() {
+  const url = props.data.url || (props.data.bvid ? `https://www.bilibili.com/video/${props.data.bvid}` : '')
+  if (!url) { emit('toast', '无可用链接', 'error'); return }
+  const directUrl = buildDownloadUrl(url, appStore.quality, appStore.videoFormat)
+  navigator.clipboard.writeText(directUrl).then(() => {
+    emit('toast', '直链已复制到剪贴板', 'success')
+  }).catch(() => {
+    emit('toast', '复制失败，请手动复制', 'error')
+  })
+}
+
 function downloadDanmaku() {
   const cid = props.data.cid
   if (!cid) return
   downloadStore.directDownload(`/api/bilibili/danmaku/${cid}`, `${sanitize(props.data.title || 'danmaku')}_弹幕.xml`)
   emit('toast', '弹幕下载已开始', 'success')
 }
+
+// 多 P 支持
+const pagesExpanded = ref(false)
+const isMultiP = computed(() => (props.data.pages?.length || 0) > 1)
+
+function fmtDur(d: number) {
+  const m = Math.floor(d / 60)
+  const s = d % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
+function handleDownloadPage(p: { page: number; part: string; cid: number }) {
+  const url = `https://www.bilibili.com/video/${props.data.bvid}?p=${p.page}`
+  const title = sanitize(`${props.data.title}_P${p.page}_${p.part}`)
+  const qn = appStore.quality
+  const maxQ = props.data.maxQuality || 80
+  const actualQn = qn > maxQ ? maxQ : qn
+  const qName = QUALITY_MAP[actualQn] || String(actualQn)
+  const fname = `${qName}_${title}.mp4`
+  downloadStore.createTask(url, fname, actualQn, appStore.videoFormat)
+    .then(() => { emit('toast', `P${p.page} 下载任务已创建`, 'success'); downloadStore.panelOpen = true })
+    .catch((e: Error) => emit('toast', `P${p.page} 下载失败: ${e.message}`, 'error'))
+}
+
+function handleDownloadAllPages() {
+  const pages = props.data.pages
+  if (!pages || pages.length === 0) return
+  const qn = appStore.quality
+  const maxQ = props.data.maxQuality || 80
+  const actualQn = qn > maxQ ? maxQ : qn
+  const qName = QUALITY_MAP[actualQn] || String(actualQn)
+
+  for (const p of pages) {
+    const url = `https://www.bilibili.com/video/${props.data.bvid}?p=${p.page}`
+    const title = sanitize(`${props.data.title}_P${p.page}_${p.part}`)
+    const fname = `${qName}_${title}.mp4`
+    downloadStore.createTask(url, fname, actualQn, appStore.videoFormat).catch(() => {})
+  }
+  emit('toast', `已创建 ${pages.length} 个分P下载任务`, 'success')
+  downloadStore.panelOpen = true
+}
 </script>
 
 <style lang="scss" scoped>
 .rr {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   padding: 8px 12px;
@@ -276,6 +354,93 @@ function downloadDanmaku() {
       border-color: rgba(251,114,153,0.3);
       background: rgba(251,114,153,0.1);
     }
+  }
+
+  // ---------- 多 P 分集 ----------
+  &__pages {
+    flex-basis: 100%;
+    margin-top: 6px;
+    padding: 8px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.06);
+    max-height: 240px;
+    overflow-y: auto;
+  }
+
+  &__pages-head {
+    font-size: 12px;
+    color: #A2A7B0;
+    margin-bottom: 6px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  &__pages-dlall {
+    @include btn-reset;
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(0,161,214,0.3);
+    background: rgba(0,161,214,0.1);
+    color: #00A1D6;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.15s;
+    &:hover { background: #00A1D6; color: #fff; }
+  }
+
+  &__page-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: 6px;
+    transition: background 0.15s;
+    &:hover { background: rgba(255,255,255,0.06); }
+  }
+
+  &__page-num {
+    font-size: 11px;
+    font-weight: 700;
+    color: #00A1D6;
+    min-width: 28px;
+  }
+
+  &__page-title {
+    flex: 1;
+    font-size: 12px;
+    color: #ddd;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__page-dur {
+    font-size: 11px;
+    color: #888;
+    min-width: 36px;
+    text-align: right;
+  }
+
+  &__page-dl {
+    width: 24px; height: 24px;
+    border-radius: 6px;
+    border: 1px solid rgba(0,161,214,0.3);
+    background: rgba(0,161,214,0.1);
+    color: #00A1D6;
+    font-size: 10px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+    &:hover { background: #00A1D6; color: #fff; }
   }
 }
 

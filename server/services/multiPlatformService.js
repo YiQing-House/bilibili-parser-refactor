@@ -225,6 +225,7 @@ class MultiPlatformService {
                 }
 
                 page++;
+                await new Promise(resolve => setTimeout(resolve, 300));
 
                 // 限制最多获取200个视频
                 if (results.length >= 200) {

@@ -49,6 +49,9 @@ class BilibiliService {
         // key: taskId, value: { abortController, ffmpegProcess, tempFiles }
         this.activeDownloads = new Map();
 
+        // 进度追踪器（由 index.js 通过 setProgressTracker 注入）
+        this.progressTracker = null;
+
         // 通用请求头（模拟真实Chrome浏览器）
         this.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0',
@@ -75,6 +78,13 @@ class BilibiliService {
         this.tvAppSecret = '59b43e04ad6965f34319062b478f83dd';
         // 环境提供的 TV access_key（可选）
         this.tvAccessKey = process.env.BILI_TV_ACCESS_KEY || '';
+    }
+
+    /**
+     * 注入进度追踪器（由 index.js 调用，替代 global 污染）
+     */
+    setProgressTracker(tracker) {
+        this.progressTracker = tracker;
     }
 
     // ============================================================
@@ -316,7 +326,7 @@ class BilibiliService {
             const pgcUrl = `https://api.bilibili.com/pgc/player/web/playurl?${new URLSearchParams(pgcParams)}`;
 
             const resp2 = await axios.get(pgcUrl, {
-                headers: this.headers,
+                headers: { ...this.headers, Cookie: cookieStr },
                 timeout: 8000
             });
 
@@ -387,7 +397,7 @@ class BilibiliService {
 
             if (response.data?.code === 0 && response.data?.data?.ticket) {
                 this.biliTicket = response.data.data.ticket;
-                this.biliTicketExpire = now + 259000 * 1000;
+                this.biliTicketExpire = now + 259000 * 1000; // 259000秒 ≈ 3天，接近官方 ticket 有效期
                 console.log('✅ 获取 bili_ticket 成功');
                 return this.biliTicket;
             }
@@ -429,12 +439,8 @@ class BilibiliService {
     generateBLsid() {
         const chars = '0123456789ABCDEF';
         let part1 = '';
-        let part2 = '';
         for (let i = 0; i < 8; i++) {
             part1 += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-        for (let i = 0; i < 8; i++) {
-            part2 += chars.charAt(Math.floor(Math.random() * chars.length));
         }
         return `${part1}_${Date.now().toString(16).toUpperCase()}`;
     }
@@ -1115,6 +1121,8 @@ class BilibiliService {
 
                 ytdlp.on('close', (code) => {
                     clearTimeout(errorTimeout);
+                    // 清理临时 cookie 文件
+                    if (cookieFile) { try { fs.unlinkSync(cookieFile) } catch {} }
                     if (code !== 0 || hasError) {
                         console.error(`yt-dlp 退出码: ${code}, 错误输出: ${errorOutput.substring(0, 200)}`);
                         // 如果是412错误且还没设置响应头，可以回退
@@ -1282,8 +1290,8 @@ class BilibiliService {
                     console.log(`合并音视频并转换为 ${format} 格式...`);
 
                     // 报告合并阶段开始
-                    if (taskId && typeof global.updateDownloadProgress === 'function') {
-                        global.updateDownloadProgress(taskId, {
+                    if (taskId && this.progressTracker) {
+                        this.progressTracker.set(taskId, {
                             stage: 'merge',
                             percent: 0,
                             status: 'merging',
@@ -1294,8 +1302,8 @@ class BilibiliService {
                     await this.mergeVideoAudio(videoFile, audioFile, outputFile, format, taskId);
 
                     // 报告合并完成
-                    if (taskId && typeof global.updateDownloadProgress === 'function') {
-                        global.updateDownloadProgress(taskId, {
+                    if (taskId && this.progressTracker) {
+                        this.progressTracker.set(taskId, {
                             stage: 'merge',
                             percent: 100,
                             status: 'complete',
@@ -1340,7 +1348,7 @@ class BilibiliService {
             if (format !== 'm4s' && format !== 'mp4') {
                 const hasFfmpeg = await this.checkFfmpeg();
                 if (hasFfmpeg) {
-                    const convertedFile = path.join(this.downloadDir, `${safeTitle}.${format}`);
+                    const convertedFile = path.join(this.downloadDir, `${finalTitle}.${format}`);
                     await this.convertVideoFormat(videoFile, convertedFile, format);
                     if (res.headersSent) {
                         throw new Error('响应头已发送');
@@ -1349,7 +1357,7 @@ class BilibiliService {
                     const contentType = this.getContentType(format);
                     res.setHeader('Content-Type', contentType);
                     res.setHeader('Content-Length', stats.size);
-                    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeTitle)}.${format}"`);
+                    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(finalTitle)}.${format}"`);
                     const fileStream = fs.createReadStream(convertedFile);
                     fileStream.pipe(res);
                     fileStream.on('end', () => {
@@ -1368,7 +1376,7 @@ class BilibiliService {
             const contentType = format === 'm4s' ? 'video/mp4' : this.getContentType(format);
             res.setHeader('Content-Type', contentType);
             res.setHeader('Content-Length', stats.size);
-            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(safeTitle)}.${format === 'm4s' ? 'mp4' : format}"`);
+            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(finalTitle)}.${format === 'm4s' ? 'mp4' : format}"`);
 
             const fileStream = fs.createReadStream(videoFile);
             fileStream.pipe(res);
@@ -1382,8 +1390,8 @@ class BilibiliService {
         } catch (error) {
             console.error('B站下载失败:', error);
             // 报告下载失败
-            if (taskId && typeof global.updateDownloadProgress === 'function') {
-                global.updateDownloadProgress(taskId, {
+            if (taskId && this.progressTracker) {
+                this.progressTracker.set(taskId, {
                     status: 'error',
                     stage: 'error',
                     percent: 0,
@@ -1495,8 +1503,8 @@ class BilibiliService {
                 if (hasFfmpeg) {
                     console.log(`合并音视频并转换为 ${format} 格式...`);
 
-                    if (taskId && typeof global.updateDownloadProgress === 'function') {
-                        global.updateDownloadProgress(taskId, {
+                    if (taskId && this.progressTracker) {
+                        this.progressTracker.set(taskId, {
                             stage: 'merge',
                             percent: 0,
                             status: 'merging',
@@ -1513,8 +1521,8 @@ class BilibiliService {
                     } catch (e) { }
 
                     // 报告完成，返回下载链接
-                    if (taskId && typeof global.updateDownloadProgress === 'function') {
-                        global.updateDownloadProgress(taskId, {
+                    if (taskId && this.progressTracker) {
+                        this.progressTracker.set(taskId, {
                             stage: 'complete',
                             percent: 100,
                             status: 'completed',
@@ -1530,8 +1538,8 @@ class BilibiliService {
             }
 
             // 没有音频或没有 ffmpeg
-            if (taskId && typeof global.updateDownloadProgress === 'function') {
-                global.updateDownloadProgress(taskId, {
+            if (taskId && this.progressTracker) {
+                this.progressTracker.set(taskId, {
                     stage: 'complete',
                     percent: 100,
                     status: 'completed',
@@ -1546,8 +1554,8 @@ class BilibiliService {
 
         } catch (error) {
             console.error('异步下载失败:', error);
-            if (taskId && typeof global.updateDownloadProgress === 'function') {
-                global.updateDownloadProgress(taskId, {
+            if (taskId && this.progressTracker) {
+                this.progressTracker.set(taskId, {
                     status: 'error',
                     stage: 'error',
                     percent: 0,
@@ -1667,9 +1675,9 @@ class BilibiliService {
                     process.stdout.write(`\r📥 ${label}: ${downloadedMB}MB | ${speed}MB/s    `);
                 }
 
-                // 向前端报告进度（如果提供了 taskId）
-                if (taskId && typeof global.updateDownloadProgress === 'function') {
-                    global.updateDownloadProgress(taskId, {
+                // 向前端报告进度
+                if (taskId && this.progressTracker) {
+                    this.progressTracker.set(taskId, {
                         stage: stage || label,
                         percent: percent,
                         downloadedMB: downloadedMB,
@@ -1692,8 +1700,8 @@ class BilibiliService {
                 console.log(`\r✅ ${label}完成: ${finalMB}MB                    `);
 
                 // 报告该阶段完成
-                if (taskId && typeof global.updateDownloadProgress === 'function') {
-                    global.updateDownloadProgress(taskId, {
+                if (taskId && this.progressTracker) {
+                    this.progressTracker.set(taskId, {
                         stage: stage || label,
                         percent: 100,
                         downloadedMB: finalMB,
@@ -1837,8 +1845,8 @@ class BilibiliService {
         }
 
         // 4. 更新进度状态
-        if (typeof global.updateDownloadProgress === 'function') {
-            global.updateDownloadProgress(taskId, {
+        if (this.progressTracker) {
+            this.progressTracker.set(taskId, {
                 status: 'cancelled',
                 stage: 'cancelled',
                 percent: 0,

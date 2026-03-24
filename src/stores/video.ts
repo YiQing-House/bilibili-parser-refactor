@@ -104,6 +104,13 @@ export const useVideoStore = defineStore('video', {
 
     /** 批量解析（保留失败项，支持去重） */
     async parseBatch(urls: string[]) {
+      // 前端限制最多 50 条
+      const MAX_BATCH = 50
+      if (urls.length > MAX_BATCH) {
+        urls = urls.slice(0, MAX_BATCH)
+        console.warn(`[Batch] 超过 ${MAX_BATCH} 条限制，已截断`)
+      }
+
       this.isLoading = true
       this.error = null
       this.currentResult = null

@@ -8,12 +8,14 @@
         class="hero-search__input"
         v-model="videoStore.inputUrl"
         rows="1"
-        placeholder="粘贴视频链接，开始解析...（Shift+Enter 换行）"
+        placeholder="粘贴视频链接，开始解析...（Shift+Enter 换行 | 支持拖拽）"
         @focus="isFocused = true"
         @blur="isFocused = false"
         @keydown="onKeydown"
         @paste="onPaste"
         @input="autoResize"
+        @drop.prevent="onDrop"
+        @dragover.prevent
       />
       <button
         v-if="videoStore.inputUrl.trim()"
@@ -155,15 +157,45 @@ function autoResize() {
   isMultiline.value = needH > singleLine + 2
 }
 
-// 智能粘贴：粘贴后自动触发解析
+// 智能粘贴：粘贴后自动触发解析（防止与 Ctrl+V 快捷键双重触发）
 function onPaste() {
   setTimeout(() => {
     showTools.value = true
     autoResize()
-    if (videoStore.inputUrl.trim()) {
+    if (videoStore.inputUrl.trim() && !videoStore.isLoading) {
       handleParse()
     }
   }, 50)
+}
+
+/** #8 拖拽文件/文本输入 */
+function onDrop(e: DragEvent) {
+  const dt = e.dataTransfer
+  if (!dt) return
+
+  // 优先处理纯文本拖拽
+  const text = dt.getData('text/plain')
+  if (text?.trim()) {
+    videoStore.inputUrl = text.trim()
+    showTools.value = true
+    nextTick(() => { autoResize(); handleParse() })
+    return
+  }
+
+  // 处理 .txt 文件拖拽 — 读取其中链接
+  const file = dt.files?.[0]
+  if (file && (file.type === 'text/plain' || file.name.endsWith('.txt'))) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const content = (reader.result as string)?.trim()
+      if (content) {
+        videoStore.inputUrl = content
+        showTools.value = true
+        nextTick(() => { autoResize(); handleParse() })
+      }
+    }
+    reader.readAsText(file)
+  }
 }
 
 async function pasteFromClipboard() {

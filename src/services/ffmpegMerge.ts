@@ -29,7 +29,12 @@ async function getFFmpeg(): Promise<FFmpeg> {
     // 使用 CDN 加载 wasm 文件，避免本地打包体积过大
     coreURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.js',
     wasmURL: 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm/ffmpeg-core.wasm',
-  }).then(() => {})
+  }).then(() => {}).catch((err) => {
+    // 重置状态，允许下次调用重试
+    ffmpegInstance = null
+    loadingPromise = null
+    throw err
+  })
 
   await loadingPromise
   console.log('[FFmpeg] wasm 加载完成')
@@ -85,10 +90,11 @@ export async function mergeVideoAudio(
   // 5. 合并（-c copy 不重新编码，速度极快）
   report('merging', 70, '合并音视频...')
 
-  ffmpeg.on('progress', ({ progress }) => {
+  const progressHandler = ({ progress }: { progress: number }) => {
     const pct = Math.round(70 + progress * 25) // 70% ~ 95%
     report('merging', Math.min(pct, 95), '合并中...')
-  })
+  }
+  ffmpeg.on('progress', progressHandler)
 
   await ffmpeg.exec([
     '-i', 'video.m4s',
@@ -100,6 +106,8 @@ export async function mergeVideoAudio(
     'output.mp4',
   ])
 
+  ffmpeg.off('progress', progressHandler)
+
   // 6. 读取输出
   report('done', 98, '读取输出...')
   const outputData = await ffmpeg.readFile('output.mp4') as Uint8Array
@@ -109,7 +117,7 @@ export async function mergeVideoAudio(
   await ffmpeg.deleteFile('audio.m4a')
   await ffmpeg.deleteFile('output.mp4')
 
-  const blob = new Blob([new Uint8Array(outputData)], { type: 'video/mp4' })
+  const blob = new Blob([outputData as BlobPart], { type: 'video/mp4' })
   report('done', 100, '完成')
 
   return blob

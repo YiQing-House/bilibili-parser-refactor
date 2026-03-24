@@ -10,7 +10,10 @@ export interface DownloadTask {
   id: string
   filename: string
   videoUrl: string
+  qn: number
+  format: string
   backendTaskId?: string
+  downloadUrl?: string
   status: 'pending' | 'starting' | 'downloading' | 'completed' | 'error' | 'cancelled' | 'paused'
   percent: number
   stage: string
@@ -22,12 +25,21 @@ interface DownloadState {
   // [P3] Map → Record，确保 Vue 响应式系统完全追踪属性变化
   tasks: Record<string, DownloadTask>
   panelOpen: boolean
+  // 下载统计（持久化）
+  downloadStats: {
+    totalCount: number
+    totalSize: number // 字节
+  }
 }
+
+// [P3] 最大并发下载数
+const MAX_CONCURRENT = 3
 
 export const useDownloadStore = defineStore('download', {
   state: (): DownloadState => ({
     tasks: {},
     panelOpen: false,
+    downloadStats: { totalCount: 0, totalSize: 0 },
   }),
 
   getters: {
@@ -36,11 +48,14 @@ export const useDownloadStore = defineStore('download', {
     },
     activeCount(): number {
       return this.taskList.filter((t) =>
-        ['pending', 'starting', 'downloading'].includes(t.status)
+        ['starting', 'downloading'].includes(t.status)
       ).length
     },
     completedCount(): number {
       return this.taskList.filter((t) => t.status === 'completed').length
+    },
+    pendingCount(): number {
+      return this.taskList.filter((t) => t.status === 'pending').length
     },
     totalCount(): number {
       return Object.keys(this.tasks).length
@@ -48,23 +63,45 @@ export const useDownloadStore = defineStore('download', {
   },
 
   actions: {
-    /** 创建异步下载任务 */
+    /** 创建异步下载任务（含并发控制） */
     async createTask(videoUrl: string, filename: string, qn: number = 80, format: string = 'mp4') {
       const taskId = `dl_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+
+      // [P3] 并发限制：超过 MAX_CONCURRENT 时排队
+      const isQueued = this.activeCount >= MAX_CONCURRENT
 
       const task: DownloadTask = {
         id: taskId,
         filename,
         videoUrl,
-        status: 'starting',
+        qn,
+        format,
+        status: isQueued ? 'pending' : 'starting',
         percent: 0,
-        stage: '提交任务中...',
+        stage: isQueued ? `排队中（第${this.pendingCount + 1}位）...` : '提交任务中...',
         speed: '',
       }
       this.tasks[taskId] = task
 
+      if (isQueued) {
+        // 排队等待，由 processQueue 在其他任务完成时触发
+        return taskId
+      }
+
+      await this._startTask(taskId, videoUrl, qn, format)
+      return taskId
+    },
+
+    /** 内部：实际启动下载任务 */
+    async _startTask(taskId: string, videoUrl: string, qn: number = 80, format: string = 'mp4') {
+      const task = this.tasks[taskId]
+      if (!task) return
+
+      task.status = 'starting'
+      task.stage = '提交任务中...'
+      this.tasks[taskId] = { ...task }
+
       try {
-        // 创建后端任务
         const res = await bilibiliApi.createDownloadTask({
           url: videoUrl,
           qn,
@@ -75,15 +112,22 @@ export const useDownloadStore = defineStore('download', {
         task.stage = '任务已创建...'
         this.tasks[taskId] = { ...task }
 
-        // 开始轮询进度
         this.startPolling(taskId, res.taskId)
-
-        return taskId
       } catch (e: unknown) {
         task.status = 'error'
         task.stage = e instanceof Error ? e.message : '创建失败'
         this.tasks[taskId] = { ...task }
-        throw e
+        this._processQueue()
+      }
+    },
+
+    /** 内部：处理排队任务（有任务完成/失败/取消时调用） */
+    _processQueue() {
+      const pending = this.taskList.filter(t => t.status === 'pending')
+      const slots = MAX_CONCURRENT - this.activeCount
+      for (let i = 0; i < Math.min(slots, pending.length); i++) {
+        const t = pending[i]
+        this._startTask(t.id, t.videoUrl, t.qn, t.format)
       }
     },
 
@@ -124,19 +168,27 @@ export const useDownloadStore = defineStore('download', {
             clearInterval(timer)
             updated.percent = 100
             updated.stage = '已完成'
+            updated.downloadUrl = progress.downloadUrl || ''
+
+            // 更新下载统计
+            const fileSizeBytes = (progress.totalMB || 0) * 1024 * 1024
+            this.recordDownloadComplete(fileSizeBytes)
 
             // 触发浏览器下载
             if (progress.downloadUrl) {
               this.triggerBrowserDownload(progress.downloadUrl, progress.fileName || task.filename)
             }
+            this._processQueue()
           } else if (progress.status === 'error') {
             clearInterval(timer)
             updated.status = 'error'
             updated.stage = progress.error || '下载失败'
+            this._processQueue()
           } else if (progress.status === 'cancelled') {
             clearInterval(timer)
             updated.status = 'cancelled'
             updated.stage = '已取消'
+            this._processQueue()
           }
 
           this.tasks[frontendId] = updated
@@ -158,6 +210,7 @@ export const useDownloadStore = defineStore('download', {
         if (t && ['starting', 'downloading'].includes(t.status)) {
           clearInterval(timer)
           this.tasks[frontendId] = { ...t, status: 'error', stage: '处理超时' }
+          this._processQueue()
         }
       }, 15 * 60 * 1000)
     },
@@ -195,6 +248,7 @@ export const useDownloadStore = defineStore('download', {
       }
 
       this.tasks[taskId] = { ...task, status: 'cancelled', stage: '已取消' }
+      this._processQueue()
     },
 
     /** 清除已完成/失败/取消的任务 */
@@ -206,9 +260,41 @@ export const useDownloadStore = defineStore('download', {
       }
     },
 
+    /** 重试失败/取消的任务 */
+    async retryTask(taskId: string) {
+      const task = this.tasks[taskId]
+      if (!task || !['error', 'cancelled'].includes(task.status)) return
+
+      // 保存原任务参数
+      const { videoUrl, filename, qn, format } = task
+      // 删除旧任务
+      delete this.tasks[taskId]
+      // 重新创建（保留原始画质和格式）
+      await this.createTask(videoUrl, filename, qn, format)
+    },
+
     /** 切换面板显示 */
     togglePanel() {
       this.panelOpen = !this.panelOpen
     },
+
+    /** 记录下载完成（更新统计） */
+    recordDownloadComplete(fileSize: number = 0) {
+      this.downloadStats.totalCount++
+      this.downloadStats.totalSize += fileSize
+    },
+
+    /** 格式化统计大小 */
+    formatSize(bytes: number): string {
+      if (bytes === 0) return '0 B'
+      const units = ['B', 'KB', 'MB', 'GB']
+      const i = Math.floor(Math.log(bytes) / Math.log(1024))
+      return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + units[i]
+    },
+  },
+
+  persist: {
+    key: 'bili-parser-download',
+    pick: ['downloadStats'],
   },
 })

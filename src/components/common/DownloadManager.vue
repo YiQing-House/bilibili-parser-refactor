@@ -6,8 +6,9 @@
         <div class="dm-panel">
           <div class="dm-head">
             <h3><i class="fas fa-tasks"></i> 下载管理 <span class="dm-count">{{ downloadStore.totalCount }}</span></h3>
+            <span v-if="pendingCount > 0" class="dm-queued"><i class="fas fa-clock"></i> {{ pendingCount }} 个排队中</span>
             <div class="dm-head__right">
-              <button v-if="downloadStore.completedCount" class="text-sm text-danger" @click="downloadStore.clearFinished">清除已完成</button>
+              <button v-if="downloadStore.completedCount" class="text-sm text-danger" @click="downloadStore.clearFinished">清除已完成 ({{ downloadStore.completedCount }})</button>
               <button class="dm-close" @click="downloadStore.togglePanel">✕</button>
             </div>
           </div>
@@ -20,7 +21,10 @@
 
             <TransitionGroup name="task-anim" tag="div" class="dm-list">
               <div v-for="task in downloadStore.taskList" :key="task.id" :class="['dm-task', `dm-task--${task.status}`]">
-                <div class="dm-task__name">{{ task.filename }}</div>
+                <div class="dm-task__name">
+                  {{ task.filename }}
+                  <span v-if="task.qn" class="dm-qn">{{ qualityLabel(task.qn) }}</span>
+                </div>
                 <div class="dm-task__info">
                   <span>{{ task.stage }}</span>
                   <span v-if="task.speed" class="dm-speed">{{ task.speed }}</span>
@@ -29,14 +33,31 @@
                   <div class="dm-bar__fill" :style="{ width: `${task.percent}%` }"></div>
                   <span class="dm-pct">{{ task.percent }}%</span>
                 </div>
+                <div v-else-if="task.status === 'pending'" class="dm-bar dm-bar--pending">
+                  <div class="dm-bar__fill dm-bar__fill--pending"></div>
+                  <span class="dm-pct">排队中</span>
+                </div>
                 <div class="dm-task__status">
                   <i v-if="task.status === 'completed'" class="fas fa-check-circle s-done"></i>
-                  <i v-else-if="task.status === 'error'" class="fas fa-exclamation-circle s-err"></i>
-                  <i v-else-if="task.status === 'cancelled'" class="fas fa-ban s-cancel"></i>
+                  <button v-if="task.status === 'completed' && task.downloadUrl" class="dm-redownload" @click="downloadStore.triggerBrowserDownload(task.downloadUrl, task.filename)" title="重新下载">
+                    <i class="fas fa-download"></i>
+                  </button>
+                  <template v-else-if="task.status === 'error' || task.status === 'cancelled'">
+                    <i :class="task.status === 'error' ? 'fas fa-exclamation-circle s-err' : 'fas fa-ban s-cancel'"></i>
+                    <button class="dm-retry" @click="downloadStore.retryTask(task.id)" title="重试">
+                      <i class="fas fa-redo-alt"></i>
+                    </button>
+                  </template>
                   <button v-else class="dm-cancel" @click="downloadStore.cancelTask(task.id)"><i class="fas fa-times"></i></button>
                 </div>
               </div>
             </TransitionGroup>
+          </div>
+
+          <!-- 底部统计 -->
+          <div v-if="downloadStore.downloadStats.totalCount > 0" class="dm-stats">
+            <span><i class="fas fa-chart-bar"></i> 累计 {{ downloadStore.downloadStats.totalCount }} 次</span>
+            <span>{{ downloadStore.formatSize(downloadStore.downloadStats.totalSize) }}</span>
           </div>
         </div>
       </div>
@@ -45,8 +66,12 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useDownloadStore } from '@/stores/download'
+import { QUALITY_MAP } from '@/types/video'
 const downloadStore = useDownloadStore()
+const pendingCount = computed(() => downloadStore.pendingCount)
+function qualityLabel(qn: number) { return QUALITY_MAP[qn] || `${qn}` }
 </script>
 
 <style lang="scss" scoped>
@@ -94,6 +119,18 @@ const downloadStore = useDownloadStore()
   @include glass-elevated;
   display: flex; flex-direction: column;
   box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
+
+  // [#4] 移动端：底部滑出全宽
+  @include mobile {
+    width: 100vw;
+    max-width: 100vw;
+    height: 60vh;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.3);
+  }
 }
 
 .dm-head {
@@ -165,6 +202,69 @@ const downloadStore = useDownloadStore()
   width: 22px; height: 22px; border-radius: 50%;
   color: var(--color-text-secondary); font-size: var(--font-size-xs);
   &:hover { color: var(--color-danger); background: rgba(255, 71, 87, 0.1); }
+}
+
+.dm-retry {
+  @include btn-reset;
+  width: 22px; height: 22px; border-radius: 50%;
+  color: var(--color-blue); font-size: var(--font-size-xs); margin-left: 4px;
+  &:hover { color: #fff; background: var(--color-blue); }
+}
+
+.dm-queued {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  background: rgba(255,165,0,0.1);
+  border: 1px solid rgba(255,165,0,0.25);
+  padding: 2px 8px;
+  border-radius: 12px;
+  i { margin-right: 4px; }
+}
+
+.dm-bar--pending {
+  .dm-bar__fill--pending {
+    width: 100% !important;
+    background: linear-gradient(90deg, rgba(255,165,0,0.2), rgba(255,165,0,0.5), rgba(255,165,0,0.2));
+    background-size: 200% 100%;
+    animation: pending-shimmer 1.5s ease-in-out infinite;
+  }
+}
+@keyframes pending-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.dm-task--pending { border-color: rgba(255,165,0,0.25); }
+
+.dm-qn {
+  font-size: 10px;
+  background: var(--color-primary);
+  color: white;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: 6px;
+  font-weight: var(--font-weight-bold);
+  vertical-align: middle;
+}
+
+.dm-redownload {
+  @include btn-reset;
+  color: var(--color-primary);
+  font-size: 0.85rem;
+  margin-left: 4px;
+  opacity: 0.7;
+  transition: opacity 0.15s;
+  &:hover { opacity: 1; }
+}
+
+.dm-stats {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  border-top: 1px solid var(--color-border);
+  i { margin-right: 4px; }
 }
 
 .panel-enter-active { transition: all 0.3s var(--ease-out); }

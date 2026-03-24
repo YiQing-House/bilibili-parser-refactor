@@ -37,6 +37,20 @@
               </div>
             </div>
 
+            <!-- ========== 下载统计 ========== -->
+            <div class="up-dl-stats">
+              <div class="up-dl-stats__item">
+                <i class="fas fa-download"></i>
+                <span class="up-dl-stats__val">{{ downloadStore.downloadStats.totalCount }}</span>
+                <span class="up-dl-stats__label">已下载</span>
+              </div>
+              <div class="up-dl-stats__item">
+                <i class="fas fa-database"></i>
+                <span class="up-dl-stats__val">{{ downloadStore.formatSize(downloadStore.downloadStats.totalSize) }}</span>
+                <span class="up-dl-stats__label">累计大小</span>
+              </div>
+            </div>
+
             <!-- ========== 未登录：扫码登录入口 ========== -->
             <div v-if="!authStore.isLoggedIn" class="up-login-prompt">
               <i class="fas fa-qrcode"></i>
@@ -332,14 +346,17 @@ import { ref, computed, watch, inject, reactive } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useVideoStore } from '@/stores/video'
 import { useAppStore } from '@/stores/app'
+import { useDownloadStore } from '@/stores/download'
 import * as authApi from '@/services/auth'
 import { buildStreamUrl } from '@/services/bilibili'
+import { QUALITY_OPTIONS, QUALITY_MAP } from '@/types/video'
 import { downloadAndMerge, type MergeProgress } from '@/services/ffmpegMerge'
 import LoginModal from '@/components/common/LoginModal.vue'
 
 const authStore = useAuthStore()
 const videoStore = useVideoStore()
 const appStore = useAppStore()
+const downloadStore = useDownloadStore()
 const toast = inject<(m: string, t: string) => void>('toast')
 
 // 扫码登录弹窗
@@ -415,14 +432,6 @@ const batchDownloading = ref(false)
 const batchProgress = ref('提交中...')
 
 // 画质选项
-const QUALITY_OPTIONS = [
-  { qn: 120, label: '4K' },
-  { qn: 116, label: '1080P60' },
-  { qn: 80,  label: '1080P' },
-  { qn: 64,  label: '720P' },
-  { qn: 32,  label: '480P' },
-  { qn: 16,  label: '360P' },
-]
 const batchQn = ref(appStore.quality || 80)
 
 const selectedCount = computed(() => {
@@ -548,13 +557,9 @@ const expPct = computed(() => {
 function fmt(n: number) { return Math.floor(n).toLocaleString('zh-CN') }
 
 // 画质 qn -> 显示文本
-const QN_MAP: Record<number, string> = {
-  120: '4K', 116: '1080P60', 112: '1080P+', 80: '1080P',
-  74: '720P60', 64: '720P', 32: '480P', 16: '360P',
-}
 function qualityLabel(qn: number | undefined) {
   if (!qn) return ''
-  return QN_MAP[qn] || ''
+  return QUALITY_MAP[qn] || ''
 }
 
 function fmtDate(ts: number) {
@@ -779,6 +784,26 @@ watch(() => authStore.profilePanelOpen, (open) => {
     flex-wrap: wrap;
     &--loading { gap: 6px; }
   }
+}
+
+// [#15] 下载统计卡片
+.up-dl-stats {
+  display: flex; gap: 12px;
+  margin-top: 8px;
+  &__item {
+    flex: 1; display: flex; flex-direction: column; align-items: center;
+    gap: 2px; padding: 8px;
+    background: var(--color-bg-input); border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    i { font-size: 14px; color: var(--color-primary); margin-bottom: 2px; }
+  }
+  &__val {
+    font-size: 16px; font-weight: 700;
+    background: linear-gradient(135deg, #fb7299, #00a1d6);
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  &__label { font-size: 10px; color: var(--color-text-secondary); }
 }
 
 .up-mini {

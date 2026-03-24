@@ -100,14 +100,14 @@ router.use('/model', async (req, res) => {
 
     // ---------- 1. 尝试从磁盘缓存读取 ----------
     const cachePath = getCachePath(source, rest)
-    if (fs.existsSync(cachePath)) {
-      const data = fs.readFileSync(cachePath)
+    try {
+      const data = await fs.promises.readFile(cachePath)
       res.setHeader('Content-Type', contentType)
       res.setHeader('Cache-Control', 'public, max-age=2592000')  // 30 天
       res.setHeader('Access-Control-Allow-Origin', '*')
       res.setHeader('X-Cache', 'HIT')
       return res.send(data)
-    }
+    } catch { /* 缓存未命中，继续从 CDN 拉取 */ }
 
     // ---------- 2. 缓存未命中，从 CDN 拉取 ----------
     let cdnUrl = ''
@@ -151,6 +151,10 @@ router.use('/model', async (req, res) => {
 
 // 缓存管理：清除全部缓存
 router.delete('/cache', (req, res) => {
+  const { password } = req.query
+  if (password !== process.env.ADMIN_PWD) {
+    return res.status(403).json({ success: false, error: '权限不足' })
+  }
   try {
     if (fs.existsSync(CACHE_DIR)) {
       fs.rmSync(CACHE_DIR, { recursive: true, force: true })

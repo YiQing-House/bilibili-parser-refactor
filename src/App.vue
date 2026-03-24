@@ -44,9 +44,7 @@
       <img v-if="authStore.isLoggedIn && authStore.userInfo?.avatar" :src="authStore.userInfo.avatar" class="side-btn__avatar" referrerpolicy="no-referrer" />
       <i v-else class="fas fa-user"></i>
     </button>
-    <button class="side-btn" @click="appStore.toggleSettings()" title="设置">
-      <i class="fas fa-cog"></i>
-    </button>
+
     <button class="side-btn side-btn--pink" @click="showAnnouncement" title="通告">
       <i class="fas fa-bullhorn"></i>
       <span v-if="hasNewAnnouncement" class="side-badge">!</span>
@@ -98,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, provide, onMounted } from 'vue'
+import { ref, computed, provide, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useDownloadStore } from '@/stores/download'
@@ -261,17 +259,57 @@ async function identifyBgCharacter() {
   }
 }
 
+// 全局禁止右键菜单（搜索框 input/textarea 除外）
+function onGlobalContextMenu(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  const tag = target.tagName.toLowerCase()
+  if (tag === 'input' || tag === 'textarea') return
+  e.preventDefault()
+}
+
+// [#10] 全局键盘快捷键
+function onGlobalKeydown(e: KeyboardEvent) {
+  // Esc — 关闭所有弹窗/面板
+  if (e.key === 'Escape') {
+    if (announcementVisible.value) { announcementVisible.value = false; return }
+    if (downloadStore.panelOpen) { downloadStore.panelOpen = false; return }
+    if (authStore.profilePanelOpen) { authStore.toggleProfile(); return }
+  }
+  // Ctrl+V — 非输入框焦点时自动聚焦搜索框并触发粘贴+解析
+  if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+    const tag = (document.activeElement as HTMLElement)?.tagName?.toLowerCase()
+    if (tag !== 'input' && tag !== 'textarea') {
+      e.preventDefault()
+      const searchInput = document.querySelector('.hero-search__input') as HTMLTextAreaElement
+      if (searchInput) {
+        searchInput.focus()
+        navigator.clipboard.readText().then(text => {
+          if (text.trim()) {
+            searchInput.value = text.trim()
+            searchInput.dispatchEvent(new Event('input', { bubbles: true }))
+            // 如果粘贴内容包含 bilibili 链接，自动触发解析
+            if (/bilibili\.com|b23\.tv|BV[a-zA-Z0-9]/i.test(text)) {
+              setTimeout(() => {
+                searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+              }, 100)
+            }
+          }
+        }).catch(() => { /* clipboard permission denied */ })
+      }
+    }
+  }
+}
+
 onMounted(() => {
   appStore.initThemeListener()
   fetchAnnouncement()
+  document.addEventListener('contextmenu', onGlobalContextMenu)
+  document.addEventListener('keydown', onGlobalKeydown)
+})
 
-  // 全局禁止右键菜单（搜索框 input/textarea 除外）
-  document.addEventListener('contextmenu', (e: MouseEvent) => {
-    const target = e.target as HTMLElement
-    const tag = target.tagName.toLowerCase()
-    if (tag === 'input' || tag === 'textarea') return
-    e.preventDefault()
-  })
+onUnmounted(() => {
+  document.removeEventListener('contextmenu', onGlobalContextMenu)
+  document.removeEventListener('keydown', onGlobalKeydown)
 })
 </script>
 
@@ -453,5 +491,32 @@ onMounted(() => {
 @keyframes annSlideUp {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+// [#4] 移动端适配 — 侧边按钮缩小、位置调整
+@media (max-width: 768px) {
+  .side-buttons {
+    right: 8px;
+    bottom: 80px; // 避免与底部搜索栏重叠
+    gap: 8px;
+  }
+  .side-btn {
+    width: 36px;
+    height: 36px;
+    font-size: 0.85rem;
+  }
+  .side-badge {
+    min-width: 14px; height: 14px;
+    font-size: 8px;
+    top: -3px; right: -3px;
+  }
+}
+
+// [#7] Live2D 模型切换淡入淡出过渡
+#waifu {
+  transition: opacity 0.4s ease;
+}
+#waifu canvas {
+  transition: opacity 0.3s ease;
 }
 </style>

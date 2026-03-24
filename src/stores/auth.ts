@@ -145,4 +145,9 @@ export const useAuthStore = defineStore('auth', {
       }
     },
   },
+
+  persist: {
+    key: 'bili-parser-auth',
+    pick: ['isLoggedIn', 'isVip', 'vipLabel', 'userInfo'],
+  },
 })
