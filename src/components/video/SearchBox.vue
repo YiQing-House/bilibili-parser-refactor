@@ -1,76 +1,82 @@
 <template>
   <div class="hero-search" ref="cardRef">
-    <!-- 搜索框 -->
-    <div class="hero-search__bar" :class="{ focused: isFocused, hasValue: videoStore.inputUrl.trim(), multiline: isMultiline }">
-      <i class="fas fa-link hero-search__bar-icon"></i>
-      <textarea
-        ref="inputRef"
-        class="hero-search__input"
-        v-model="videoStore.inputUrl"
-        rows="1"
-        placeholder="粘贴视频链接，开始解析...（Shift+Enter 换行 | 支持拖拽）"
-        @focus="isFocused = true"
-        @blur="isFocused = false"
-        @keydown="onKeydown"
-        @paste="onPaste"
-        @input="autoResize"
-        @drop.prevent="onDrop"
-        @dragover.prevent
-      />
-      <button
-        v-if="videoStore.inputUrl.trim()"
-        class="hero-search__clear"
-        @click="clearInput"
-        title="清空"
-      >
-        <i class="fas fa-times"></i>
-      </button>
-      <button
-        class="hero-search__submit"
-        @click="handleParse"
-        :disabled="videoStore.isLoading || !videoStore.inputUrl.trim()"
-      >
-        <i :class="videoStore.isLoading ? 'fas fa-circle-notch fa-spin' : 'fas fa-arrow-right'"></i>
-        <span class="hero-search__submit-text">{{ videoStore.isLoading ? '解析中' : '去水印下载' }}</span>
-      </button>
-    </div>
-
-    <!-- 工具行 — 始终显示 -->
-    <div class="hero-search__tools">
-      <div class="hero-search__options">
-        <QualitySelector
-          v-model="appStore.quality"
-          :disabled="!appStore.needsQuality"
-          @login-required="$emit('showLogin')"
-          @vip-required="$emit('toast', '此画质需要大会员', 'error')"
+    <!-- 一体化搜索卡片 -->
+    <div class="hero-search__card" :class="{ focused: isFocused, hasValue: videoStore.inputUrl.trim() }">
+      <!-- 上半：搜索栏 -->
+      <div class="hero-search__bar" :class="{ multiline: isMultiline }">
+        <i class="fas fa-link hero-search__bar-icon"></i>
+        <textarea
+          ref="inputRef"
+          class="hero-search__input"
+          v-model="videoStore.inputUrl"
+          rows="1"
+          placeholder="粘贴视频链接，开始解析...（Shift+Enter 换行 | 支持拖拽）"
+          @focus="isFocused = true"
+          @blur="isFocused = false"
+          @keydown="onKeydown"
+          @paste="onPaste"
+          @input="autoResize"
+          @drop.prevent="onDrop"
+          @dragover.prevent
         />
-      </div>
-      <div class="custom-select" ref="formatRef">
-        <div class="custom-select__trigger" @click.stop="formatOpen = !formatOpen">
-          {{ FORMAT_OPTIONS.find(o => o.value === appStore.format)?.label || '完整' }}
-          <i class="fas fa-chevron-down" :class="{ rotated: formatOpen }"></i>
-        </div>
-        <Transition name="dropdown">
-          <div v-if="formatOpen" class="custom-select__menu">
-            <div
-              v-for="opt in FORMAT_OPTIONS" :key="opt.value"
-              class="custom-select__item"
-              :class="{ active: appStore.format === opt.value }"
-              @click="appStore.format = opt.value; formatOpen = false"
-            >{{ opt.label }}</div>
-          </div>
-        </Transition>
+        <button
+          v-if="videoStore.inputUrl.trim()"
+          class="hero-search__clear"
+          @click="clearInput"
+          title="清空"
+        >
+          <i class="fas fa-times"></i>
+        </button>
+        <button
+          class="hero-search__submit"
+          @click="handleParse"
+          :disabled="videoStore.isLoading || !videoStore.inputUrl.trim()"
+        >
+          <i :class="videoStore.isLoading ? 'fas fa-circle-notch fa-spin' : 'fas fa-arrow-right'"></i>
+          <span class="hero-search__submit-text">{{ videoStore.isLoading ? '解析中' : '去水印下载' }}</span>
+        </button>
       </div>
 
-      <div class="hero-search__actions">
-        <button class="action-pill" @click="pasteFromClipboard" title="粘贴">
-          <i class="fas fa-clipboard"></i>
-          <span>粘贴</span>
-        </button>
-        <button class="action-pill" @click="toggleHistory" title="历史记录">
-          <i class="fas fa-history"></i>
-          <span>历史</span>
-        </button>
+      <!-- 分隔线 -->
+      <div class="hero-search__divider"></div>
+
+      <!-- 下半：工具行 -->
+      <div class="hero-search__tools">
+        <div class="hero-search__options">
+          <QualitySelector
+            v-model="appStore.quality"
+            :disabled="!appStore.needsQuality"
+            @login-required="$emit('showLogin')"
+            @vip-required="$emit('toast', '此画质需要大会员', 'error')"
+          />
+        </div>
+        <div class="custom-select" ref="formatRef">
+          <div class="custom-select__trigger" @click.stop="formatOpen = !formatOpen">
+            {{ FORMAT_OPTIONS.find(o => o.value === appStore.format)?.label || '完整' }}
+            <i class="fas fa-chevron-down" :class="{ rotated: formatOpen }"></i>
+          </div>
+          <Transition name="dropdown">
+            <div v-if="formatOpen" class="custom-select__menu">
+              <div
+                v-for="opt in FORMAT_OPTIONS" :key="opt.value"
+                class="custom-select__item"
+                :class="{ active: appStore.format === opt.value }"
+                @click="appStore.format = opt.value; formatOpen = false"
+              >{{ opt.label }}</div>
+            </div>
+          </Transition>
+        </div>
+
+        <div class="hero-search__actions">
+          <button class="action-pill" @click="pasteFromClipboard" title="粘贴">
+            <i class="fas fa-clipboard"></i>
+            <span>粘贴</span>
+          </button>
+          <button class="action-pill" @click="toggleHistory" title="历史记录">
+            <i class="fas fa-history"></i>
+            <span>历史</span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -273,29 +279,17 @@ async function handleParse() {
   margin: 0 auto;
   padding: var(--spacing-md) 0;
 
-  // ---- 搜索框 ----
-  &__bar {
+  // ---- 一体化卡片容器 ----
+  &__card {
     width: 100%;
-    display: flex;
-    align-items: center;
-    min-height: 56px;
-    padding: 0 8px 0 20px;
-    gap: 12px;
     backdrop-filter: blur(var(--glass-blur)) saturate(150%);
     -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
     background: var(--search-card-bg);
     border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity));
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-lg);
     box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12), var(--shadow-card-inner);
     transition: all 0.3s var(--ease-out);
     animation: fadeInUp 0.6s var(--ease-out) 0.1s both;
-
-    // 多行时按钮贴底 + 方角
-    &.multiline {
-      align-items: flex-end;
-      padding: 10px 8px 10px 20px;
-      border-radius: var(--radius-lg);
-    }
 
     &.focused,
     &.hasValue {
@@ -305,6 +299,22 @@ async function handleParse() {
                   0 0 0 1px var(--color-border-focus),
                   0 0 40px rgba(251, 114, 153, 0.08);
     }
+  }
+
+  // ---- 搜索栏（卡片上半） ----
+  &__bar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    min-height: 52px;
+    padding: 0 12px 0 20px;
+    gap: 12px;
+
+    // 多行时按钮贴底
+    &.multiline {
+      align-items: flex-end;
+      padding: 10px 8px 10px 20px;
+    }
 
     @include mobile {
       min-height: 48px;
@@ -313,13 +323,26 @@ async function handleParse() {
     }
   }
 
+  // ---- 分隔线 ----
+  &__divider {
+    height: 1px;
+    margin: 0 16px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.06) 20%,
+      rgba(255, 255, 255, 0.06) 80%,
+      transparent
+    );
+  }
+
   &__bar-icon {
     color: var(--color-text-placeholder);
     font-size: 14px;
     flex-shrink: 0;
     transition: color var(--transition-fast);
 
-    .focused & {
+    .hero-search__card.focused & {
       color: var(--color-primary);
     }
   }
@@ -400,26 +423,19 @@ async function handleParse() {
     }
   }
 
-  // ---- 工具行 ----
+  // ---- 工具行（卡片下半） ----
   &__tools {
     width: 100%;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-top: var(--spacing-sm);
-    padding: var(--spacing-xs) var(--spacing-md);
+    padding: 6px 12px 8px 20px;
     gap: var(--spacing-sm);
-    backdrop-filter: blur(var(--glass-blur)) saturate(150%);
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(150%);
-    background: var(--search-card-bg);
-    border: 1px solid rgba(255, 255, 255, var(--glass-border-opacity));
-    border-radius: var(--radius-full);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08), var(--shadow-card-inner);
 
     @include mobile {
       flex-wrap: wrap;
       justify-content: center;
-      border-radius: var(--radius-lg);
+      padding: 6px 10px;
     }
   }
 
@@ -432,8 +448,6 @@ async function handleParse() {
     overflow-x: auto;
     @include hide-scrollbar;
   }
-
-
 
   &__actions {
     display: flex;

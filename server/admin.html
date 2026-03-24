@@ -33,10 +33,25 @@
     .ann-card-item .title { font-weight: 600; color: #fb7299; font-size: 0.9rem; margin-bottom: 4px; }
     .ann-card-item .content { font-size: 0.8rem; color: #aaa; line-height: 1.5; margin-bottom: 6px; white-space: pre-line; max-height: 60px; overflow: hidden; }
     .ann-card-item .meta { font-size: 0.7rem; color: #666; display: flex; justify-content: space-between; align-items: center; }
-    .del-btn { background: none; border: 1px solid rgba(255,71,87,0.3); color: #ff4757; padding: 2px 10px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; }
+    .del-btn, .edit-btn, .toggle-btn { background: none; padding: 2px 10px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; }
+    .del-btn { border: 1px solid rgba(255,71,87,0.3); color: #ff4757; }
     .del-btn:hover { background: rgba(255,71,87,0.1); }
+    .edit-btn { border: 1px solid rgba(0,161,214,0.3); color: #00a1d6; }
+    .edit-btn:hover { background: rgba(0,161,214,0.1); }
+    .toggle-btn { border: 1px solid rgba(46,213,115,0.3); color: #2ed573; }
+    .toggle-btn.off { border-color: rgba(136,136,136,0.3); color: #888; }
+    .toggle-btn:hover { background: rgba(46,213,115,0.1); }
     .tag-on { color: #2ed573; } .tag-off { color: #888; }
     .empty { text-align: center; color: #555; padding: 20px; font-size: 0.85rem; }
+    .btn-group { display: flex; gap: 6px; }
+    /* 编辑弹窗 */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; }
+    .modal { background: #1a1a2e; border: 1px solid #333; border-radius: 16px; padding: 24px; width: 460px; max-width: 90vw; }
+    .modal h3 { color: #fb7299; margin-bottom: 14px; font-size: 1rem; }
+    .modal-btns { display: flex; gap: 10px; margin-top: 16px; }
+    .modal-btns button { flex: 1; padding: 8px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; border: none; }
+    .modal-btns .save { background: linear-gradient(135deg, #fb7299, #e91e63); color: white; }
+    .modal-btns .cancel { background: #16213e; border: 1px solid #333; color: #e0e0e0; }
     .pwd-row { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
     .pwd-row input { flex: 1; }
     .pwd-row button { padding: 9px 16px; background: #16213e; border: 1px solid #333; color: #e0e0e0; border-radius: 8px; cursor: pointer; font-size: 0.85rem; white-space: nowrap; }
@@ -79,6 +94,26 @@
     </div>
   </div>
 
+  <!-- 编辑弹窗 -->
+  <div class="modal-overlay" id="editModal" style="display:none" onclick="if(event.target===this)closeEdit()">
+    <div class="modal">
+      <h3>✏️ 编辑通告</h3>
+      <input type="hidden" id="editId">
+      <label>标题</label>
+      <input type="text" id="editTitle">
+      <label>内容</label>
+      <textarea id="editContent"></textarea>
+      <div class="row">
+        <div class="toggle on" id="editToggle" onclick="this.classList.toggle('on')"></div>
+        <span style="font-size:0.85rem">启用</span>
+      </div>
+      <div class="modal-btns">
+        <button class="cancel" onclick="closeEdit()">取消</button>
+        <button class="save" onclick="saveEdit()">保存</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     let pwd = '';
 
@@ -102,7 +137,11 @@
           <div class="content">${esc(a.content)}</div>
           <div class="meta">
             <span>${new Date(a.updatedAt).toLocaleString('zh-CN')} · <span class="${a.enabled ? 'tag-on' : 'tag-off'}">${a.enabled ? '已启用' : '已禁用'}</span></span>
-            <button class="del-btn" onclick="delAnn('${a.id}')">删除</button>
+            <div class="btn-group">
+              <button class="toggle-btn ${a.enabled ? '' : 'off'}" onclick="toggleAnn('${a.id}')">${a.enabled ? '禁用' : '启用'}</button>
+              <button class="edit-btn" onclick="editAnn('${a.id}','${esc(a.title)}','${esc(a.content).replace(/'/g,'\\&#39;')}',${a.enabled})">编辑</button>
+              <button class="del-btn" onclick="delAnn('${a.id}')">删除</button>
+            </div>
           </div>
         </div>
       `).join('');
@@ -145,6 +184,72 @@
     }
 
     function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // 切换启用/禁用
+    async function toggleAnn(id) {
+      try {
+        await fetch('/api/admin/announcement/' + id + '/toggle', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd }),
+        });
+        loadHistory();
+      } catch {}
+    }
+
+    // 打开编辑弹窗
+    let annDataCache = [];
+    const origLoadHistory = loadHistory;
+    // 覆盖 loadHistory 以缓存数据
+    loadHistory = async function() {
+      pwd = document.getElementById('pwd').value;
+      if (!pwd) return;
+      try {
+        const res = await fetch('/api/admin/announcements?password=' + encodeURIComponent(pwd));
+        const json = await res.json();
+        if (!json.success) { alert(json.error || '加载失败'); return; }
+        annDataCache = json.data || [];
+        renderHistory(annDataCache);
+      } catch (e) { alert('网络错误'); }
+    };
+
+    function editAnn(id) {
+      const item = annDataCache.find(a => a.id === id);
+      if (!item) return;
+      document.getElementById('editId').value = id;
+      document.getElementById('editTitle').value = item.title || '';
+      document.getElementById('editContent').value = item.content || '';
+      const tog = document.getElementById('editToggle');
+      tog.classList.toggle('on', item.enabled);
+      document.getElementById('editModal').style.display = 'flex';
+    }
+
+    function closeEdit() {
+      document.getElementById('editModal').style.display = 'none';
+    }
+
+    async function saveEdit() {
+      const id = document.getElementById('editId').value;
+      try {
+        const res = await fetch('/api/admin/announcement/' + id, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            password: pwd,
+            title: document.getElementById('editTitle').value,
+            content: document.getElementById('editContent').value,
+            enabled: document.getElementById('editToggle').classList.contains('on'),
+          }),
+        });
+        const json = await res.json();
+        if (json.success) {
+          closeEdit();
+          loadHistory();
+        } else {
+          alert(json.error || '保存失败');
+        }
+      } catch { alert('网络错误'); }
+    }
   </script>
 </body>
 </html>

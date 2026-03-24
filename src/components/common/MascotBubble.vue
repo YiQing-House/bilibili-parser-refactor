@@ -47,7 +47,7 @@ onUnmounted(() => { if (typeTimer) clearInterval(typeTimer) })
 <style lang="scss" scoped>
 .mascot-bubble {
   position: fixed;
-  bottom: 340px; left: 20px;
+  bottom: 340px; left: calc(50vw - 340px);
   max-width: 260px; min-width: 120px;
   padding: 10px 14px;
   border-radius: 12px 12px 12px 4px;
@@ -100,4 +100,15 @@ onUnmounted(() => { if (typeTimer) clearInterval(typeTimer) })
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 @keyframes blink { 50% { opacity: 0; } }
+
+// 移动端适配
+@media (max-width: 767px) {
+  .mascot-bubble {
+    left: 12px;
+    bottom: 120px;
+    max-width: calc(100vw - 24px);
+    font-size: 12px;
+    padding: 8px 12px;
+  }
+}
 </style>

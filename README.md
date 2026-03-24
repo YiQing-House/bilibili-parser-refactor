@@ -1,133 +1,128 @@
-# 🎬 B站视频去水印助手 (Refactored)
+# 🎬 B站视频去水印助手
 
-> B站视频解析下载工具 —— 基于 Vue3 + TypeScript + Vite 的全栈重构版本
+> 基于 Vue 3 + TypeScript + Express 的全栈视频解析下载工具
 
-[English](#english) | [中文](#中文)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+🔗 **原项目**：[YiQing-House/bilibili-parser](https://github.com/YiQing-House/bilibili-parser)
 
 ---
 
-<a id="中文"></a>
+## ✨ 功能一览
 
-## ✨ 功能特性
+| 功能 | 说明 |
+|------|------|
+| 🎯 多链接解析 | 单个 / 批量 / 收藏夹 / UP主投稿 |
+| 🎬 多画质支持 | 4K / 1080P60 / 1080P / 720P / 480P / 360P |
+| 📥 多格式下载 | 完整视频 / 仅音频 / 封面提取 |
+| 🔐 扫码登录 | B站扫码登录，自动检测大会员画质 |
+| 🎵 音乐播放器 | 集成网易云音乐 APlayer |
+| 🤖 AI 看板娘 | Live2D + 智谱 AI 聊天（可切换角色） |
+| ⚡ 下载管理 | 实时进度追踪、取消、批量管理 |
+| 📱 响应式布局 | PC / 平板 / 手机三档自适应 |
+| 🎨 毛玻璃 UI | Glassmorphism 设计 + 暗色主题 |
 
-- 🎯 **多链接处理**：支持单个、批量、收藏夹、用户投稿处理
-- 🎨 **双主题系统**：蜜桃奶茶（明亮）+ 暗樱粉（暗色），自动跟随系统
-- 🔐 **扫码登录**：B站 QR 码扫码登录、VIP 权限检测
-- 📥 **多格式下载**：完整 / 视音分离 / 仅音频 / 仅视频 / 封面
-- 🎬 **多画质支持**：4K / 1080P高帧率 / 1080P / 720P / 480P / 360P
-- ⚡ **下载任务管理**：进度追踪、取消、批量管理
-- 📱 **响应式布局**：PC / Pad / Mobile 三档自适应
-- 💾 **状态持久化**：Pinia + LocalStorage 自动保存設定
+## 🖼️ 预览
 
-## 🏗️ 项目结构
+<details>
+<summary>桌面端截图</summary>
 
-```
-src/
-├── assets/              # 静态资源
-├── components/
-│   ├── common/          # 通用组件
-│   │   ├── AppToast.vue       # 全局提示
-│   │   ├── DownloadManager.vue # 下载管理面板
-│   │   ├── LoadingSpinner.vue  # 加载动画
-│   │   ├── LoginModal.vue      # 登录弹窗
-│   │   └── SkeletonLoader.vue  # 骨架屏
-│   ├── layout/          # 布局组件
-│   │   ├── AppHeader.vue       # 头部导航
-│   │   └── AppFooter.vue       # 页脚
-│   └── video/           # 业务组件
-│       ├── QualitySelector.vue # 画质选择器
-│       ├── ResultCard.vue      # 结果卡片
-│       └── SearchBox.vue       # 搜索框
-├── services/            # API 层
-│   ├── api.ts           # Axios 实例 + 拦截器
-│   ├── auth.ts          # 登录认证 API
-│   └── bilibili.ts      # B站解析 API
-├── stores/              # Pinia 状态管理
-│   ├── app.ts           # 全局设置
-│   ├── auth.ts          # 登录状态
-│   ├── download.ts      # 下载任务
-│   └── video.ts         # 视频解析
-├── styles/              # SCSS 样式体系
-│   ├── _variables.scss  # Design Tokens
-│   ├── _mixins.scss     # 响应式 Mixins
-│   ├── _reset.scss      # CSS Reset
-│   └── global.scss      # 全局样式
-├── types/               # TypeScript 类型
-│   ├── api.ts
-│   └── video.ts
-├── views/
-│   └── HomeView.vue     # 主页
-├── App.vue
-└── main.ts
-```
+![Desktop](test_screenshots/desktop_1280.png)
+
+</details>
+
+<details>
+<summary>移动端截图</summary>
+
+![Mobile](test_screenshots/mobile_375.png)
+
+</details>
+
+## 🏗️ 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| **前端** | Vue 3 + TypeScript + Vite + Pinia + SCSS |
+| **后端** | Node.js + Express + yt-dlp + FFmpeg |
+| **AI** | 智谱 GLM-4.5 (SSE 流式) |
+| **看板娘** | Live2D Widget |
+| **音乐** | APlayer + MetingJS |
 
 ## 🚀 快速开始
 
-### 前端开发
+### 本地开发
+
 ```bash
+# 克隆项目
+git clone https://github.com/YiQing-House/bilibili-parser-refactor.git
 cd bilibili-parser-refactor
+
+# 安装依赖
 npm install
+
+# 复制环境变量
+cp .env.example .env
+# 编辑 .env 填写配置
+
+# 启动开发模式（前端 + 后端同时运行）
+# 终端 1：前端
 npm run dev
-# 访问 http://localhost:5173
+
+# 终端 2：后端
+npm run server
 ```
 
-### 后端服务 (需同时运行)
+### 生产构建
+
 ```bash
-cd bilibili-parser   # 原始后端
-npm install
-npm start
-# 后端运行在 http://localhost:3000
+npm run build    # 构建前端
+npm run prod     # 构建 + 启动后端（一键生产模式）
 ```
 
-> Vite 已配置代理，前端 `/api/*` 请求自动转发到 `localhost:3000`
+## 📦 宝塔面板部署
 
-## 🛠️ 技术栈
+详见 👉 [deploy/BT_DEPLOY.md](deploy/BT_DEPLOY.md)
 
-| 前端 | 后端 |
-|------|------|
-| Vue 3 + Composition API | Node.js + Express |
-| TypeScript | JavaScript |
-| Vite | yt-dlp + ffmpeg |
-| Pinia + Persistedstate | Cookie + Session |
-| SCSS + CSS Variables | Docker |
-| Vue Router 4 | |
-| Axios | |
+## ⚙️ 环境变量
 
----
+| 变量 | 必填 | 说明 |
+|------|------|------|
+| `PORT` | 否 | 服务端口，默认 7621 |
+| `ADMIN_PWD` | 是 | 管理面板密码 |
+| `CORS_ORIGIN` | 是 | 前端域名（如 `https://dl.example.com`） |
+| `GLM_API_KEY` | 否 | 智谱 AI Key（看板娘聊天用） |
+| `GLM_MODEL` | 否 | AI 模型，默认 `glm-4.5-air` |
+| `NETEASE_COOKIE` | 否 | 网易云 Cookie（音乐播放器用） |
 
-<a id="english"></a>
+## 📁 项目结构
 
-## 🎬 Bilibili Video Downloader (Refactored)
-
-> A bilibili video parsing & download tool — fully refactored with Vue3 + TypeScript + Vite
-
-### Features
-- 🎯 Multi-link: single, batch, favorites, user uploads
-- 🎨 Dual-theme: Peach Milk Tea (light) + Dark Sakura Pink (dark)
-- 🔐 QR Code login with VIP detection
-- 📥 Multiple formats: complete / split / audio-only / video-only / cover
-- 🎬 Quality: 4K / 1080P60 / 1080P / 720P / 480P / 360P
-- ⚡ Download manager with progress tracking
-- 📱 Responsive: PC / Tablet / Mobile
-- 💾 Persistent state via Pinia
-
-### Quick Start
-```bash
-# Frontend
-npm install && npm run dev
-
-# Backend (in original bilibili-parser directory)
-npm install && npm start
 ```
-
-### Tech Stack
-- **Frontend**: Vue 3, TypeScript, Vite, Pinia, SCSS, Vue Router
-- **Backend**: Node.js, Express, yt-dlp, ffmpeg
+├── src/                    # 前端源码 (Vue 3)
+│   ├── components/         # 组件
+│   ├── composables/        # 组合式函数
+│   ├── modules/            # 功能模块（看板娘/聊天）
+│   ├── services/           # API 层
+│   ├── stores/             # Pinia 状态管理
+│   ├── styles/             # SCSS 样式体系
+│   └── views/              # 页面
+├── server/                 # 后端 (Express)
+│   ├── routes/             # 路由模块
+│   ├── services/bilibili/  # B站解析核心
+│   ├── helpers/            # 辅助工具
+│   └── middleware/         # 中间件
+├── deploy/                 # 部署配置
+│   ├── BT_DEPLOY.md        # 宝塔部署指南
+│   ├── nginx.conf          # Nginx 配置模板
+│   ├── setup.sh            # 一键部署脚本
+│   └── update.sh           # 更新脚本
+└── public/                 # 静态资源
+```
 
 ## 📄 License
 
-MIT License
+[MIT](LICENSE) © [YiQing-House](https://github.com/YiQing-House)
 
-## 📞 原项目
+## 🔗 相关链接
 
-基于 [YiQing-House/bilibili-parser](https://github.com/YiQing-House/bilibili-parser) 重构
+- 🏠 **原项目**：[YiQing-House/bilibili-parser](https://github.com/YiQing-House/bilibili-parser)
+- 🐛 **Issues**：[提交反馈](https://github.com/YiQing-House/bilibili-parser-refactor/issues)

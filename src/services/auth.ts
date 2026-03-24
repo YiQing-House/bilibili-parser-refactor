@@ -70,8 +70,4 @@ export async function getHistory(max = 0, viewAt = 0) {
   return data.data
 }
 
-/** 获取点赞视频 */
-export async function getLikedVideos(page = 1) {
-  const { data } = await api.get('/api/bilibili/liked', { params: { page } })
-  return data.data
-}
+

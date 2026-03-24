@@ -3,47 +3,33 @@
  * bilibili-parser-refactor 内置后端
  * ============================================================
  * 
- * 从原项目 bilibili-parser/server.js 迁移而来，
- * 仅保留前端必需的 API：
- *   - 登录系统（二维码/轮询/状态/登出）
- *   - 视频解析（POST /api/parse）
- *   - 健康检查
+ * 精简入口：只负责中间件注册和路由挂载。
+ * 业务逻辑已拆分到 routes/ 和 helpers/ 目录。
  * ============================================================
  */
 
 require('dotenv').config()
 const express = require('express')
 const cors = require('cors')
-const axios = require('axios')
 const cookieParser = require('cookie-parser')
 const rateLimit = require('express-rate-limit')
-const fs = require('fs')
 const path = require('path')
-const os = require('os')
 const SessionStore = require('./sessionStore')
-const { encWbi } = require('./wbiSign')
 
-// 原项目 services（视频下载/多平台/yt-dlp）
+// 服务层
 const bilibiliService = require('./services/bilibiliService')
-const multiPlatformService = require('./services/multiPlatformService')
-const ytdlpService = require('./services/ytdlpService')
 
 const app = express()
-const PORT = process.env.PORT || 7621  // [P3] 默认端口与 .env 和 vite 代理保持一致
+const PORT = process.env.PORT || 7621
 
-// [P3] 公共请求头常量（消除 14 处重复）
-const BILIBILI_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  'Referer': 'https://www.bilibili.com/',
-}
+// ==================== 共享实例 ====================
 
-// ==================== 下载进度追踪（模块化）====================
+// 下载进度追踪器
 const ProgressTracker = require('./shared/progressTracker')
 const downloadProgress = new ProgressTracker()
-// 注入进度追踪器到 service 层（彻底消除 global 污染）
 bilibiliService.setProgressTracker(downloadProgress)
 
-// 持久化会话存储（JSON 文件，重启不丢失）
+// 持久化会话存储
 const loginSessions = new SessionStore()
 
 // 数据分析模块
@@ -52,17 +38,17 @@ const { accessLogger, logDownload, getStats, getRangeStats } = require('./analyt
 // 看板娘聊天 AI
 const { registerChatAPI, registerVideoAnalysis } = require('./chat')
 
-// 中间件
-// [安全] CORS 白名单 — 只允许已知来源
+// ==================== 中间件 ====================
+
+// [安全] CORS 白名单
 const CORS_WHITELIST = [
   'http://localhost:7622',
   'http://localhost:7621',
   'http://127.0.0.1:7622',
-  process.env.CORS_ORIGIN, // 生产域名从 .env 注入
+  process.env.CORS_ORIGIN,
 ].filter(Boolean)
 app.use(cors({
   origin: (origin, cb) => {
-    // 允许无 origin 的请求（如服务器直接访问、Postman）
     if (!origin || CORS_WHITELIST.includes(origin)) return cb(null, true)
     cb(new Error('CORS 被拒绝'))
   },
@@ -81,1197 +67,53 @@ app.use('/api/parse', parseLimiter)
 app.use('/api/download', downloadLimiter)
 app.use('/api/admin', adminLimiter)
 
-// FFmpeg.wasm 需要 SharedArrayBuffer，必须设置 COOP/COEP 头
-// 使用 credentialless 模式，比 require-corp 更宽松，不会阻止跨域图片/CDN 资源
+// FFmpeg.wasm COOP/COEP 头
 app.use((req, res, next) => {
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin')
   res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless')
   next()
 })
 
+// 访问日志
 app.use(accessLogger(loginSessions))
 
-// ==================== 登录系统 ====================
+// ==================== 路由注册 ====================
 
-// 获取登录二维码
-app.get('/api/bilibili/qrcode', async (req, res) => {
-  try {
-    const response = await axios.get(
-      'https://passport.bilibili.com/x/passport-login/web/qrcode/generate',
-      {
-        headers: {
-          ...BILIBILI_HEADERS,
-          'Referer': 'https://www.bilibili.com/',
-        },
-      }
-    )
+// 共享上下文（注入到路由工厂函数）
+const ctx = { loginSessions, downloadProgress, logDownload }
 
-    if (response.data.code === 0) {
-      const { url, qrcode_key } = response.data.data
-      // 用第三方 API 生成二维码图片
-      const qrcodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(url)}`
-      res.json({ success: true, qrcodeUrl, qrcodeKey: qrcode_key })
-    } else {
-      throw new Error(response.data.message || '获取二维码失败')
-    }
-  } catch (error) {
-    console.error('[QR] 获取二维码失败:', error.message)
-    res.status(500).json({ success: false, error: error.message })
-  }
-})
+// 认证系统
+const createAuthRoutes = require('./routes/auth')
+app.use('/api', createAuthRoutes(ctx))
 
-// 检查二维码扫描状态
-app.get('/api/bilibili/qrcode/check', async (req, res) => {
-  try {
-    const { key } = req.query
-    if (!key) return res.status(400).json({ success: false, error: '缺少 qrcode_key' })
+// 视频解析
+const createParseRoutes = require('./routes/parse')
+const parseRouter = createParseRoutes(ctx)
+app.use('/api', parseRouter)
 
-    const response = await axios.get(
-      `https://passport.bilibili.com/x/passport-login/web/qrcode/poll?qrcode_key=${key}`,
-      {
-        headers: {
-          ...BILIBILI_HEADERS,
-        },
-      }
-    )
+// 下载
+const createDownloadRoutes = require('./routes/download')
+app.use('/api', createDownloadRoutes(ctx))
 
-    const data = response.data.data
-    let status = 'waiting'
-    let userInfo = null
-    let isVip = false
-    let vipLabel = ''
+// 代理（需要 parseBilibiliVideo 来处理 302 重定向）
+const createProxyRoutes = require('./routes/proxy')
+app.use('/api', createProxyRoutes({ ...ctx, parseBilibiliVideo: parseRouter.parseBilibiliVideo }))
 
-    switch (data.code) {
-      case 0: {
-        // 登录成功
-        status = 'confirmed'
-        const urlParams = new URLSearchParams(data.url.split('?')[1])
-        const sessdata = urlParams.get('SESSDATA')
-        const biliJct = urlParams.get('bili_jct')
-        const dedeUserId = urlParams.get('DedeUserID')
+// 用户数据
+const createUserRoutes = require('./routes/user')
+app.use('/api', createUserRoutes(ctx))
 
-        if (sessdata) {
-          const cookies = { SESSDATA: sessdata, bili_jct: biliJct, DedeUserID: dedeUserId }
+// 视频增值（AI总结/字幕/弹幕）
+const createVideoRoutes = require('./routes/video')
+app.use('/api', createVideoRoutes(ctx))
 
-          // 获取用户信息
-          try {
-            const userRes = await axios.get('https://api.bilibili.com/x/web-interface/nav', {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Cookie': `SESSDATA=${sessdata}; bili_jct=${biliJct}; DedeUserID=${dedeUserId}`,
-              },
-            })
-            if (userRes.data.code === 0) {
-              const u = userRes.data.data
-              // 头像走后端代理，避免浏览器 CORS 拦截
-              const avatarProxy = `/api/proxy/avatar?url=${encodeURIComponent(u.face)}`
-              userInfo = { name: u.uname, avatar: avatarProxy, mid: u.mid }
-              isVip = u.vipStatus === 1
-              // 解析大会员类型
-              const vipTypeMap = { 0: '', 1: '月度大会员', 2: '年度大会员' }
-              vipLabel = vipTypeMap[u.vipType] || (isVip ? '大会员' : '')
-            }
-          } catch (e) {
-            console.error('[QR] 获取用户信息失败:', e.message)
-          }
-
-          // 存储会话
-          const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-          loginSessions.set(sessionId, { cookies, userInfo, isVip, vipLabel, createdAt: Date.now() })
-          res.cookie('bili_session', sessionId, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 })
-        }
-        break
-      }
-      case 86038:
-        status = 'expired'
-        break
-      case 86090:
-        status = 'scanned'
-        break
-      case 86101:
-        status = 'waiting'
-        break
-    }
-
-    res.json({ success: true, status, userInfo, isVip, vipLabel })
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// 检查登录状态
-app.get('/api/bilibili/status', (req, res) => {
-  const sessionId = req.cookies?.bili_session
-  if (sessionId && loginSessions.has(sessionId)) {
-    const session = loginSessions.get(sessionId)
-    res.json({ success: true, isLoggedIn: true, isVip: session.isVip, vipLabel: session.vipLabel || '', userInfo: session.userInfo })
-  } else {
-    res.json({ success: true, isLoggedIn: false })
-  }
-})
-
-// 退出登录
-app.post('/api/bilibili/logout', (req, res) => {
-  const sessionId = req.cookies?.bili_session
-  if (sessionId) {
-    loginSessions.delete(sessionId)
-    res.clearCookie('bili_session')
-  }
-  res.json({ success: true })
-})
-
-// 获取用户详细信息（硬币/等级/经验/获赞）
-app.get('/api/bilibili/userinfo', async (req, res) => {
-  try {
-    const sessionId = req.cookies?.bili_session
-    if (!sessionId || !loginSessions.has(sessionId)) {
-      return res.status(401).json({ success: false, error: '未登录' })
-    }
-    const session = loginSessions.get(sessionId)
-    const { cookies } = session
-    const headers = {
-      ...BILIBILI_HEADERS,
-      'Cookie': `SESSDATA=${cookies.SESSDATA}; bili_jct=${cookies.bili_jct}; DedeUserID=${cookies.DedeUserID}`,
-    }
-
-    // 并发请求 nav（个人信息）和 upstat（获赞数）
-    const [navRes, upstatRes] = await Promise.all([
-      axios.get('https://api.bilibili.com/x/web-interface/nav', { headers }),
-      axios.get(`https://api.bilibili.com/x/space/upstat?mid=${cookies.DedeUserID}`, { headers }),
-    ])
-
-    const nav = navRes.data?.data || {}
-    const upstat = upstatRes.data?.data || {}
-
-    res.json({
-      success: true,
-      data: {
-        coins: nav.money || 0,
-        level: nav.level_info?.current_level || 0,
-        currentExp: nav.level_info?.current_exp || 0,
-        nextLevelExp: nav.level_info?.next_exp || 1,
-        totalLikes: upstat.likes || 0,
-        mid: nav.mid || cookies.DedeUserID,
-      },
-    })
-  } catch (error) {
-    console.error('[UserInfo] 获取失败:', error.message)
-    res.status(500).json({ success: false, error: '获取用户信息失败' })
-  }
-})
-
-// 辅助：构造已登录请求头（基于公共常量）
-function getAuthHeaders(cookies) {
-  return {
-    ...BILIBILI_HEADERS,
-    'Cookie': `SESSDATA=${cookies.SESSDATA}; bili_jct=${cookies.bili_jct}; DedeUserID=${cookies.DedeUserID}`,
-  }
-}
-
-// 获取用户投稿视频
-// 根据视频分辨率宽度推算最高画质(qn值)
-function estimateQuality(width) {
-  if (!width) return 0
-  if (width >= 3840) return 120  // 4K
-  if (width >= 1920) return 80   // 1080P
-  if (width >= 1280) return 64   // 720P
-  if (width >= 854)  return 32   // 480P
-  return 16                       // 360P
-}
-
-app.get('/api/bilibili/submissions', async (req, res) => {
-  try {
-    const sessionId = req.cookies?.bili_session
-    if (!sessionId || !loginSessions.has(sessionId)) {
-      return res.status(401).json({ success: false, error: '未登录' })
-    }
-    const { cookies } = loginSessions.get(sessionId)
-    const headers = getAuthHeaders(cookies)
-    const page = parseInt(req.query.page) || 1
-    const pageSize = parseInt(req.query.pageSize) || 20
-
-    // 使用 wbi 签名
-    const params = { mid: cookies.DedeUserID, ps: pageSize, pn: page, order: 'pubdate' }
-    const signedParams = await encWbi(params, headers)
-    const qs = Object.entries(signedParams).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
-
-    const apiRes = await axios.get(
-      `https://api.bilibili.com/x/space/wbi/arc/search?${qs}`,
-      { headers }
-    )
-
-    if (apiRes.data?.code !== 0) {
-      console.error('[Submissions] B站返回:', apiRes.data?.code, apiRes.data?.message)
-      return res.status(500).json({ success: false, error: apiRes.data?.message || '接口返回异常' })
-    }
-
-    const list = apiRes.data?.data?.list?.vlist || []
-    const total = apiRes.data?.data?.page?.count || 0
-
-    res.json({
-      success: true,
-      data: {
-        total,
-        list: list.map(v => ({
-          bvid: v.bvid,
-          title: v.title,
-          cover: v.pic?.startsWith('//') ? `https:${v.pic}` : v.pic,
-          plays: v.play,
-          duration: v.length,
-          created: v.created,
-          comment: v.comment,           // 评论数
-          danmakus: v.video_review,     // 弹幕数
-          favorites: v.favorites,       // 收藏数
-          description: v.description,   // 简介
-          // 根据分辨率推算最高画质
-          maxQuality: estimateQuality(v.dimension?.width),
-        })),
-      },
-    })
-  } catch (error) {
-    console.error('[Submissions] 获取失败:', error.message)
-    res.status(500).json({ success: false, error: '获取投稿失败' })
-  }
-})
-
-// 获取用户收藏夹列表
-app.get('/api/bilibili/favorites', async (req, res) => {
-  try {
-    const sessionId = req.cookies?.bili_session
-    if (!sessionId || !loginSessions.has(sessionId)) {
-      return res.status(401).json({ success: false, error: '未登录' })
-    }
-    const { cookies } = loginSessions.get(sessionId)
-    const headers = getAuthHeaders(cookies)
-
-    const apiRes = await axios.get(
-      `https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid=${cookies.DedeUserID}`,
-      { headers }
-    )
-
-    const folders = apiRes.data?.data?.list || []
-    res.json({
-      success: true,
-      data: folders.map(f => ({
-        id: f.id,
-        title: f.title,
-        mediaCount: f.media_count,
-      })),
-    })
-  } catch (error) {
-    console.error('[Favorites] 获取失败:', error.message)
-    res.status(500).json({ success: false, error: '获取收藏夹失败' })
-  }
-})
-
-// 获取收藏夹内视频
-app.get('/api/bilibili/favorites/:id', async (req, res) => {
-  try {
-    const sessionId = req.cookies?.bili_session
-    if (!sessionId || !loginSessions.has(sessionId)) {
-      return res.status(401).json({ success: false, error: '未登录' })
-    }
-    const { cookies } = loginSessions.get(sessionId)
-    const headers = getAuthHeaders(cookies)
-    const page = parseInt(req.query.page) || 1
-
-    const apiRes = await axios.get(
-      `https://api.bilibili.com/x/v3/fav/resource/list?media_id=${req.params.id}&pn=${page}&ps=20&order=mtime`,
-      { headers }
-    )
-
-    const medias = apiRes.data?.data?.medias || []
-    const total = apiRes.data?.data?.info?.media_count || 0
-
-    res.json({
-      success: true,
-      data: {
-        total,
-        list: medias.map(m => {
-          // duration 为秒数，格式化为 mm:ss
-          const dur = m.duration || 0
-          const mm = Math.floor(dur / 60)
-          const ss = dur % 60
-          const durText = `${mm}:${String(ss).padStart(2, '0')}`
-          return {
-            bvid: m.bvid,
-            title: m.title,
-            cover: m.cover?.startsWith('//') ? `https:${m.cover}` : m.cover,
-            plays: m.cnt_info?.play || 0,
-            duration: durText,
-            upper: m.upper?.name || '',
-            favorites: m.cnt_info?.collect || 0,   // 收藏数
-            danmakus: m.cnt_info?.danmaku || 0,     // 弹幕数
-            pubdate: m.pubtime || 0,                // 发布时间(秒级时间戳)
-          }
-        }),
-      },
-    })
-  } catch (error) {
-    console.error('[FavDetail] 获取失败:', error.message)
-    res.status(500).json({ success: false, error: '获取收藏夹内容失败' })
-  }
-})
-// 获取观看历史
-app.get('/api/bilibili/history', async (req, res) => {
-  try {
-    const sessionId = req.cookies?.bili_session
-    if (!sessionId || !loginSessions.has(sessionId)) {
-      return res.status(401).json({ success: false, error: '未登录' })
-    }
-    const { cookies } = loginSessions.get(sessionId)
-    const headers = getAuthHeaders(cookies)
-    const ps = parseInt(req.query.ps) || 20
-    const max = parseInt(req.query.max) || 0       // cursor: max aid
-    const viewAt = parseInt(req.query.view_at) || 0 // cursor: view_at
-
-    let url = `https://api.bilibili.com/x/web-interface/history/cursor?ps=${ps}&type=archive`
-    if (max) url += `&max=${max}&view_at=${viewAt}`
-
-    const apiRes = await axios.get(url, { headers, timeout: 10000 })
-    if (apiRes.data?.code !== 0) {
-      return res.status(500).json({ success: false, error: apiRes.data?.message || '接口异常' })
-    }
-
-    const list = apiRes.data?.data?.list || []
-    const cursor = apiRes.data?.data?.cursor || {}
-
-    res.json({
-      success: true,
-      data: {
-        cursor: { max: cursor.max, viewAt: cursor.view_at },
-        hasMore: list.length >= ps,
-        list: list.map(item => {
-          const dur = item.duration || 0
-          const mm = Math.floor(dur / 60)
-          const ss = dur % 60
-          const durText = `${mm}:${String(ss).padStart(2, '0')}`
-          return {
-            bvid: item.history?.bvid || '',
-            title: item.title || '',
-            cover: item.cover?.startsWith('//') ? `https:${item.cover}` : (item.cover || ''),
-            plays: item.view_at || 0,   // 这里没有播放量，用最后观看时间
-            duration: durText,
-            progress: item.progress || 0,       // 观看进度(秒)
-            totalDuration: dur,                  // 总时长(秒)
-            upper: item.author_name || '',
-            viewAt: item.view_at || 0,          // 最后观看时间(秒级时间戳)
-            tag: item.tag_name || '',
-          }
-        }),
-      },
-    })
-  } catch (error) {
-    console.error('[History] 获取失败:', error.message)
-    res.status(500).json({ success: false, error: '获取观看历史失败' })
-  }
-})
-
-// 获取点赞视频
-app.get('/api/bilibili/liked', async (req, res) => {
-  try {
-    const sessionId = req.cookies?.bili_session
-    if (!sessionId || !loginSessions.has(sessionId)) {
-      return res.status(401).json({ success: false, error: '未登录' })
-    }
-    const { cookies } = loginSessions.get(sessionId)
-    const headers = getAuthHeaders(cookies)
-    const pn = parseInt(req.query.page) || 1
-    const ps = 20
-
-    const params = { vmid: cookies.DedeUserID, pn, ps }
-    const signedParams = await encWbi(params, headers)
-    const qs = Object.entries(signedParams).map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
-
-    const apiRes = await axios.get(
-      `https://api.bilibili.com/x/space/like/video?${qs}`,
-      { headers, timeout: 10000 }
-    )
-
-    if (apiRes.data?.code !== 0) {
-      console.error('[Liked] B站返回:', apiRes.data?.code, apiRes.data?.message)
-      return res.status(500).json({ success: false, error: apiRes.data?.message || '接口异常' })
-    }
-
-    const list = apiRes.data?.data?.list || []
-
-    res.json({
-      success: true,
-      data: {
-        hasMore: list.length >= ps,
-        list: list.map(v => ({
-          bvid: v.bvid || '',
-          title: v.title || '',
-          cover: v.pic?.startsWith('//') ? `https:${v.pic}` : (v.pic || ''),
-          plays: v.stat?.view || 0,
-          likes: v.stat?.like || 0,
-          upper: v.owner?.name || '',
-          duration: v.duration || 0,
-          pubdate: v.pubdate || 0,
-        })),
-      },
-    })
-  } catch (error) {
-    console.error('[Liked] 获取失败:', error.message)
-    res.status(500).json({ success: false, error: '获取点赞视频失败' })
-  }
-})
-
-// ==================== 视频解析 ====================
-
-app.post('/api/parse', async (req, res) => {
-  try {
-    const { url } = req.body
-    if (!url) return res.status(400).json({ success: false, error: '请提供视频链接' })
-
-    // 获取用户 cookies
-    let cookies = null
-    const sessionId = req.cookies?.bili_session
-    if (sessionId && loginSessions.has(sessionId)) {
-      cookies = loginSessions.get(sessionId).cookies
-    }
-
-    // B站视频解析（支持完整链接 / 纯BV号 / 纯AV号 / b23.tv / btv 短链）
-    const isBiliUrl = /bilibili\.com|b23\.tv|bili2233\.cn|bili22\.cn|bili23\.cn|btv/i.test(url)
-    const isBareId = /^(BV[a-zA-Z0-9]{10,}|av\d+)$/i.test(url.trim())
-    if (isBiliUrl || isBareId) {
-      const result = await parseBilibiliVideo(url, cookies)
-      // 记录解析行为
-      logDownload(req, { ...result, url }, loginSessions)
-      res.json({ success: true, data: { ...result, platform: '哔哩哔哩' } })
-    } else {
-      res.status(400).json({ success: false, error: '暂时仅支持B站视频' })
-    }
-  } catch (error) {
-    console.error('[Parse] 解析错误:', error.message)
-    res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// B站视频解析逻辑
-async function parseBilibiliVideo(url, cookies) {
-  const headers = {
-    ...BILIBILI_HEADERS,
-    'Referer': 'https://www.bilibili.com/',
-  }
-  if (cookies) {
-    headers['Cookie'] = `SESSDATA=${cookies.SESSDATA}; bili_jct=${cookies.bili_jct}; DedeUserID=${cookies.DedeUserID}`
-  }
-
-  // 处理短链接（b23.tv / btv / bili22 等）
-  let finalUrl = url.trim()
-  if (/b23\.tv|btv|bili2233\.cn|bili22\.cn|bili23\.cn/i.test(finalUrl)) {
-    // 确保有协议前缀
-    if (!/^https?:\/\//i.test(finalUrl)) finalUrl = 'https://' + finalUrl
-    const resp = await axios.get(finalUrl, { maxRedirects: 5, headers, timeout: 8000 })
-    finalUrl = resp.request.res.responseUrl || finalUrl
-  }
-
-  // 纯 BV/AV 号补全为完整链接
-  const bareIdMatch = finalUrl.match(/^(BV[a-zA-Z0-9]{10,})$/i)
-  if (bareIdMatch) {
-    finalUrl = `https://www.bilibili.com/video/${bareIdMatch[1]}`
-  }
-  const bareAvMatch = finalUrl.match(/^av(\d+)$/i)
-  if (bareAvMatch) {
-    finalUrl = `https://www.bilibili.com/video/av${bareAvMatch[1]}`
-  }
-
-  // 提取 BV 号或 AV 号
-  const bvMatch = finalUrl.match(/BV[a-zA-Z0-9]+/i)
-  const avMatch = !bvMatch && finalUrl.match(/av(\d+)/i)
-
-  let bvid
-  if (bvMatch) {
-    bvid = bvMatch[0]
-  } else if (avMatch) {
-    // AV 号转 BV 号：通过 B站 API 查询
-    const avInfo = await axios.get(`https://api.bilibili.com/x/web-interface/view?aid=${avMatch[1]}`, { headers, timeout: 8000 })
-    if (avInfo.data.code !== 0) throw new Error(avInfo.data.message || 'AV号查询失败')
-    bvid = avInfo.data.data.bvid
-    if (!bvid) throw new Error('AV号转换BV号失败')
-  } else {
-    throw new Error('无法从链接中提取视频ID')
-  }
-
-  // 获取视频信息
-  const infoRes = await axios.get(`https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`, { headers })
-  if (infoRes.data.code !== 0) throw new Error(infoRes.data.message || '获取视频信息失败')
-
-  const info = infoRes.data.data
-
-  // 获取最高画质信息（请求 playurl 获取 DASH 流）
-  let maxQuality = 80 // 默认 1080P
-  const qualities = []
-  try {
-    const cid = info.pages?.[0]?.cid || info.cid
-    if (cid) {
-      const playHeaders = { ...headers }
-      const playRes = await axios.get('https://api.bilibili.com/x/player/playurl', {
-        params: { bvid: bvid, cid: cid, qn: 120, fnval: 4048, fourk: 1, platform: 'pc' },
-        headers: playHeaders, timeout: 8000
-      })
-      if (playRes.data?.code === 0 && playRes.data?.data?.dash?.video) {
-        const videos = playRes.data.data.dash.video
-        const qnSet = new Set(videos.map(v => v.id))
-        maxQuality = Math.max(...qnSet)
-        const qnMap = { 120: '4K', 116: '1080P高帧率', 112: '1080P高帧率', 80: '1080P', 64: '720P', 32: '480P', 16: '360P' }
-        for (const qn of [...qnSet].sort((a, b) => b - a)) {
-          qualities.push({ qn, label: qnMap[qn] || `${qn}`, needVip: qn > 80, needLogin: qn > 80 })
-        }
-        console.log(`[Parse] ${bvid} 最高画质: ${qnMap[maxQuality] || maxQuality}`)
-      }
-    }
-  } catch (e) {
-    console.log('[Parse] 画质探测失败:', e.message)
-  }
-
-  return {
-    title: info.title,
-    description: info.desc,
-    cover: info.pic,
-    duration: info.duration,
-    pubdate: info.pubdate,
-    author: info.owner?.name,
-    authorMid: info.owner?.mid,
-    authorAvatar: info.owner?.face,
-    views: info.stat?.view,
-    likes: info.stat?.like,
-    coins: info.stat?.coin,
-    favorites: info.stat?.favorite,
-    shares: info.stat?.share,
-    replies: info.stat?.reply,
-    danmakus: info.stat?.danmaku,
-    bvid: info.bvid,
-    aid: info.aid,
-    cid: info.cid,
-    pages: info.pages,
-    maxQuality: maxQuality,
-    qualities: qualities,
-  }
-}
-
-// ==================== 视频下载 API（原项目迁移）====================
-
-// 视频下载（支持画质选择）
-app.get('/api/bilibili/download', async (req, res) => {
-  try {
-    const { url, qn = 80, format = 'mp4', nameFormat = 'title' } = req.query
-    if (!url) return res.status(400).json({ success: false, error: '请提供视频链接' })
-
-    let cookies = null
-    const sessionId = req.cookies?.bili_session
-    if (sessionId && loginSessions.has(sessionId)) cookies = loginSessions.get(sessionId).cookies
-
-    const taskId = `download_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    downloadProgress.set(taskId, { status: 'starting', percent: 0, stage: '准备中...', videoPercent: 0, audioPercent: 0 })
-    await bilibiliService.downloadWithQuality(url, parseInt(qn), cookies, res, format, nameFormat, taskId)
-  } catch (error) {
-    console.error('[Download] 错误:', error.message)
-    if (!res.headersSent) res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// 获取下载进度
-app.get('/api/download-progress/:taskId', (req, res) => {
-  const progress = downloadProgress.get(req.params.taskId)
-  res.json({ success: true, data: progress || { status: 'unknown', percent: 0 } })
-})
-
-// 取消下载任务
-app.post('/api/cancel-download/:taskId', (req, res) => {
-  try {
-    const { taskId } = req.params
-    const cancelled = bilibiliService.cancelDownload(taskId)
-    downloadProgress.set(taskId, { status: 'cancelled', stage: 'cancelled', percent: 0, message: '下载已取消', updatedAt: Date.now() })
-    res.json({ success: true, cancelled })
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// 创建下载任务（异步，返回 taskId 供前端轮询）
-app.post('/api/bilibili/download-task', async (req, res) => {
-  try {
-    const { url, qn = 80, format = 'mp4', nameFormat = 'title' } = req.body
-    if (!url) return res.status(400).json({ success: false, error: '请提供视频链接' })
-
-    let cookies = null
-    const sessionId = req.cookies?.bili_session
-    if (sessionId && loginSessions.has(sessionId)) cookies = loginSessions.get(sessionId).cookies
-
-    const taskId = `download_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-    downloadProgress.set(taskId, { status: 'starting', percent: 0, stage: '准备中...', videoPercent: 0, audioPercent: 0 })
-    res.json({ success: true, taskId })
-
-    bilibiliService.downloadWithQualityAsync(url, parseInt(qn), cookies, format, nameFormat, taskId)
-      .then((filePath) => {
-        const currentProgress = downloadProgress.get(taskId)
-        if (!currentProgress || currentProgress.status !== 'completed') {
-          downloadProgress.set(taskId, {
-            status: 'completed', percent: 100, stage: '下载完成', filePath,
-            fileName: path.basename(filePath),
-            downloadUrl: `/api/download-file/${encodeURIComponent(path.basename(filePath))}`,
-          })
-        }
-      })
-      .catch((error) => {
-        downloadProgress.set(taskId, { status: 'error', percent: 0, stage: '下载失败', error: error.message })
-      })
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// 下载已完成的文件
-app.get('/api/download-file/:filename', (req, res) => {
-  try {
-    const { filename } = req.params
-    const downloadDir = path.join(os.tmpdir(), 'bilibili-downloads')
-    const filePath = path.join(downloadDir, decodeURIComponent(filename))
-    if (!filePath.startsWith(downloadDir)) return res.status(403).json({ success: false, error: '访问被拒绝' })
-    if (!fs.existsSync(filePath)) return res.status(404).json({ success: false, error: '文件不存在或已过期' })
-
-    const stats = fs.statSync(filePath)
-    const ext = path.extname(filename).toLowerCase()
-    const mimeTypes = { '.mp4': 'video/mp4', '.mkv': 'video/x-matroska', '.webm': 'video/webm', '.flv': 'video/x-flv', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4' }
-    res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream')
-    res.setHeader('Content-Length', stats.size)
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
-    const fileStream = fs.createReadStream(filePath)
-    fileStream.pipe(res)
-    // [P2] 传输完成后延迟 5 分钟删除，避免慢速网络截断
-    res.on('finish', () => { setTimeout(() => { try { fs.unlinkSync(filePath) } catch {} }, 300000) })
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// 音频下载
-app.get('/api/bilibili/download/audio', async (req, res) => {
-  try {
-    const { url, qn = 80 } = req.query
-    if (!url) return res.status(400).json({ success: false, error: '请提供视频链接' })
-    let cookies = null
-    const sessionId = req.cookies?.bili_session
-    if (sessionId && loginSessions.has(sessionId)) cookies = loginSessions.get(sessionId).cookies
-    await bilibiliService.downloadAudio(url, parseInt(qn), cookies, res)
-  } catch (error) {
-    if (!res.headersSent) res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// 封面下载
-app.get('/api/bilibili/download/cover', async (req, res) => {
-  try {
-    const { url } = req.query
-    if (!url) return res.status(400).json({ success: false, error: '请提供视频链接' })
-    await bilibiliService.downloadCover(url, res)
-  } catch (error) {
-    if (!res.headersSent) res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// 视频下载（无音频）
-app.get('/api/bilibili/download/video-only', async (req, res) => {
-  try {
-    const { url, qn = 80 } = req.query
-    if (!url) return res.status(400).json({ success: false, error: '请提供视频链接' })
-    let cookies = null
-    const sessionId = req.cookies?.bili_session
-    if (sessionId && loginSessions.has(sessionId)) cookies = loginSessions.get(sessionId).cookies
-    await bilibiliService.downloadVideoOnly(url, parseInt(qn), cookies, res)
-  } catch (error) {
-    if (!res.headersSent) res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// 获取视频/音频直接下载链接
-app.get('/api/bilibili/direct-links', async (req, res) => {
-  try {
-    const { url, qn = 80 } = req.query
-    if (!url) return res.status(400).json({ success: false, error: '请提供视频链接' })
-    let cookies = null
-    const sessionId = req.cookies?.bili_session
-    if (sessionId && loginSessions.has(sessionId)) cookies = loginSessions.get(sessionId).cookies
-    const links = await bilibiliService.getDirectLinks(url, parseInt(qn), cookies)
-    res.json({ success: true, data: links })
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// 流式代理下载
-app.get('/api/bilibili/stream', async (req, res) => {
-  try {
-    const { url, qn = 80, type = 'video', format } = req.query
-    if (!url) return res.status(400).json({ success: false, error: '请提供视频链接' })
-    let cookies = null
-    const sessionId = req.cookies?.bili_session
-    if (sessionId && loginSessions.has(sessionId)) cookies = loginSessions.get(sessionId).cookies
-    const links = await bilibiliService.getDirectLinks(url, parseInt(qn), cookies)
-    const targetUrl = type === 'audio' ? links.audioUrl : links.videoUrl
-    if (!targetUrl) return res.status(400).json({ success: false, error: `无法获取${type === 'audio' ? '音频' : '视频'}链接` })
-    const ext = format || (type === 'audio' ? 'm4a' : 'm4s')
-    const filename = `${links.title}_${type}.${ext}`
-    if (format && format !== (type === 'audio' ? 'm4a' : 'm4s')) {
-      await bilibiliService.streamWithFormat(targetUrl, res, filename, type, format)
-    } else {
-      await bilibiliService.streamProxy(targetUrl, res, filename)
-    }
-  } catch (error) {
-    if (!res.headersSent) res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// ==================== 通用代理 ====================
-
-// 图片代理（防盗链）
-app.get('/api/proxy/image', async (req, res) => {
-  try {
-    const { url } = req.query
-    if (!url) return res.status(400).send('Missing url parameter')
-    const response = await axios({ method: 'GET', url, responseType: 'stream', timeout: 10000,
-      headers: { ...BILIBILI_HEADERS, 'Accept': 'image/*,*/*' }
-    })
-    res.setHeader('Content-Type', response.headers['content-type'] || 'image/jpeg')
-    res.setHeader('Cache-Control', 'public, max-age=86400')
-    response.data.pipe(res)
-  } catch (error) {
-    res.status(500).send('Failed to load image')
-  }
-})
-
-// ==================== 302 重定向直下（不走服务器带宽）====================
-// B站 CDN 签名链接不检查 Referer，可以直接 302 重定向让浏览器直下
-app.get('/api/download/redirect', async (req, res) => {
-  try {
-    const { url, filename } = req.query
-    if (!url) return res.status(400).json({ success: false, error: '请提供视频 CDN 链接' })
-
-    // 如果传入的就是 CDN 直链，直接 302
-    const isCdnUrl = url.includes('bilivideo.') || url.includes('akamaized.net') || url.includes('hdslb.com')
-    if (isCdnUrl) {
-      if (filename) {
-        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`)
-      }
-      return res.redirect(302, url)
-    }
-
-    // 如果是 BV 号或视频链接，先解析获取 CDN 链接再重定向
-    let cookies = null
-    const sessionId = req.cookies?.bili_session
-    if (sessionId && loginSessions.has(sessionId)) cookies = loginSessions.get(sessionId).cookies
-
-    // 提取 BV 号
-    const bvMatch = url.match(/BV\w+/i)
-    if (!bvMatch) return res.status(400).json({ success: false, error: '无法识别的视频链接' })
-
-    const qn = parseInt(req.query.qn) || 80
-    const result = await parseBilibiliVideo(url, cookies)
-    
-    // 通过 playurl API 获取 CDN 直链
-    const params = {
-      bvid: result.bvid,
-      cid: result.cid,
-      qn: qn,
-      fnval: 4048,  // DASH + HDR + 4K + AV1 + 8K（与其他 playurl 统一）
-      fourk: 1,
-    }
-    const headers = {
-      ...BILIBILI_HEADERS,
-    }
-    if (cookies) {
-      headers['Cookie'] = typeof cookies === 'string'
-        ? cookies
-        : Object.entries(cookies).map(([k, v]) => `${k}=${v}`).join('; ')
-    }
-
-    const playResp = await axios.get(
-      `https://api.bilibili.com/x/player/playurl?${new URLSearchParams(params)}`,
-      { headers, timeout: 10000 }
-    )
-
-    if (playResp.data.code !== 0) {
-      return res.status(500).json({ success: false, error: playResp.data.message || 'playurl 失败' })
-    }
-
-    const playData = playResp.data.data
-    let cdnUrl = ''
-
-    // DASH 格式：取视频流
-    if (playData.dash && playData.dash.video && playData.dash.video.length > 0) {
-      cdnUrl = playData.dash.video[0].baseUrl || playData.dash.video[0].base_url
-    }
-    // FLV 格式
-    else if (playData.durl && playData.durl.length > 0) {
-      cdnUrl = playData.durl[0].url
-    }
-
-    if (!cdnUrl) {
-      return res.status(500).json({ success: false, error: '未获取到视频流 URL' })
-    }
-
-    // 302 重定向到 CDN 直链
-    const videoFilename = filename || `${result.title || 'video'}.mp4`
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(videoFilename)}"`)
-    res.redirect(302, cdnUrl)
-  } catch (error) {
-    console.error('[Download/Redirect] 错误:', error.message)
-    if (!res.headersSent) {
-      res.status(500).json({ success: false, error: error.message })
-    }
-  }
-})
-
-// [安全] 允许下载代理的域名白名单
-const ALLOWED_CDN_DOMAINS = ['bilivideo.com', 'bilivideo.cn', 'akamaized.net', 'hdslb.com', 'biliimg.com']
-function isAllowedCdnUrl(urlStr) {
-  try {
-    const hostname = new URL(urlStr).hostname
-    return ALLOWED_CDN_DOMAINS.some(d => hostname.endsWith(d))
-  } catch { return false }
-}
-
-// 视频下载代理（兜底方案，走服务器带宽）
-app.get('/api/download', async (req, res) => {
-  try {
-    const { url, filename } = req.query
-    if (!url) return res.status(400).json({ success: false, error: '请提供视频链接' })
-    // [安全] 只允许 B站 CDN 域名，防止开放代理
-    if (!isAllowedCdnUrl(url)) {
-      return res.status(403).json({ success: false, error: '不允许代理此域名的资源' })
-    }
-    const videoFilename = filename || `video_${Date.now()}.mp4`
-    const response = await axios({ method: 'GET', url, responseType: 'stream', timeout: 300000, maxRedirects: 5,
-      headers: { ...BILIBILI_HEADERS, 'Accept': '*/*', 'Origin': 'https://www.bilibili.com' }
-    })
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(videoFilename)}"`)
-    res.setHeader('Content-Type', response.headers['content-type'] || 'video/mp4')
-    if (response.headers['content-length']) res.setHeader('Content-Length', response.headers['content-length'])
-    response.data.pipe(res)
-  } catch (error) {
-    if (!res.headersSent) res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// ==================== 批量解析 ====================
-app.post('/api/parse/batch', async (req, res) => {
-  try {
-    const { urls } = req.body
-    if (!urls || !Array.isArray(urls) || urls.length === 0) return res.status(400).json({ success: false, error: '请提供视频链接数组' })
-    if (urls.length > 50) return res.status(400).json({ success: false, error: '单次最多处理50个链接' })
-    const results = await multiPlatformService.parseMultiple(urls)
-    res.json({ success: true, total: urls.length, results })
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// 用户投稿处理（旧版兼容）
-app.get('/api/bilibili/user-videos', async (req, res) => {
-  try {
-    const { uid } = req.query
-    if (!uid) return res.status(400).json({ success: false, error: '请提供用户UID' })
-    let cookies = null
-    const sessionId = req.cookies?.bili_session
-    if (sessionId && loginSessions.has(sessionId)) cookies = loginSessions.get(sessionId).cookies
-    const result = await multiPlatformService.parseBilibiliUserVideos(uid, cookies)
-    res.json(result)
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// 获取支持的平台列表
-app.get('/api/platforms', (req, res) => {
-  try {
-    const platforms = multiPlatformService.getSupportedPlatforms()
-    res.json({ success: true, platforms })
-  } catch { res.json({ success: true, platforms: [] }) }
-})
-
-// ==================== yt-dlp ====================
-
-// 检查 yt-dlp 是否可用
-app.get('/api/ytdlp/check', async (req, res) => {
-  try {
-    const check = await ytdlpService.checkAvailable()
-    res.json({ success: true, available: check.available, version: check.version || null, command: check.command || null, ffmpegAvailable: check.ffmpegAvailable || false, error: check.error || null })
-  } catch (error) {
-    res.json({ success: false, available: false, error: error.message })
-  }
-})
-
-// 使用 yt-dlp 获取视频信息
-app.post('/api/ytdlp/info', async (req, res) => {
-  try {
-    const { url } = req.body
-    if (!url) return res.status(400).json({ success: false, error: '请提供视频链接' })
-    const info = await ytdlpService.getVideoInfo(url)
-    res.json({ success: true, data: { title: info.title, author: info.uploader || info.channel || '未知', duration: info.duration ? ytdlpService.formatDuration(info.duration) : '00:00', thumbnail: info.thumbnail || info.thumbnails?.[0]?.url || '', formats: info.formats || [] } })
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// 使用 yt-dlp 下载视频
-app.get('/api/ytdlp/download', async (req, res) => {
-  try {
-    let { url, format = 'best' } = req.query
-    if (!url) return res.status(400).json({ success: false, error: '请提供视频链接' })
-    const isBilibili = url.includes('bilibili.com') || url.includes('b23.tv')
-    if (isBilibili) {
-      try { await bilibiliService.downloadAndMerge(url, res); return } catch { /* fallback to yt-dlp */ }
-    }
-    const check = await ytdlpService.checkAvailable()
-    if (!check.available) return res.status(503).json({ success: false, error: '服务器未配置此下载功能' })
-    await ytdlpService.downloadVideoStream(url, format, res)
-  } catch (error) {
-    if (!res.headersSent) res.status(500).json({ success: false, error: error.message })
-  }
-})
-
-// URL 校验辅助函数
-function isValidUrl(string) {
-  try { const u = new URL(string); return u.protocol === 'http:' || u.protocol === 'https:' } catch { return false }
-}
-
-// ==================== 用户行为分析（供 AI 画像用）====================
-app.get('/api/user/profile-analysis', async (req, res) => {
-  try {
-    const sessionId = req.cookies?.bili_session
-    if (!sessionId || !loginSessions.has(sessionId)) {
-      return res.json({ success: false, error: '未登录' })
-    }
-    const cookies = loginSessions.get(sessionId).cookies
-    const headers = getAuthHeaders(cookies)
-
-    const results = { history: [], favorites: [], categories: {} }
-
-    // 1. 获取观看历史（最近 30 条）
-    try {
-      const historyRes = await axios.get(
-        'https://api.bilibili.com/x/web-interface/history/cursor?ps=30',
-        { headers, timeout: 10000 }
-      )
-      const list = historyRes.data?.data?.list || []
-      results.history = list.map(item => ({
-        title: item.title,
-        tname: item.tag_name || item.tname || '未知',
-        author: item.author_name || '',
-      }))
-    } catch (e) {
-      console.error('[ProfileAnalysis] 历史记录获取失败:', e.message)
-    }
-
-    // 2. 获取收藏夹列表 + 每个取几个视频
-    try {
-      const mid = cookies.DedeUserID
-      const favRes = await axios.get(
-        `https://api.bilibili.com/x/v3/fav/folder/created/list-all?up_mid=${mid}`,
-        { headers, timeout: 10000 }
-      )
-      const folders = favRes.data?.data?.list || []
-      // 取前 3 个收藏夹，每个取 10 个视频
-      for (const folder of folders.slice(0, 3)) {
-        try {
-          const contentRes = await axios.get(
-            `https://api.bilibili.com/x/v3/fav/resource/list?media_id=${folder.id}&ps=10&pn=1`,
-            { headers, timeout: 8000 }
-          )
-          const medias = contentRes.data?.data?.medias || []
-          for (const m of medias) {
-            results.favorites.push({
-              title: m.title,
-              tname: m.upper?.name ? '' : '', // 分区在 intro 里不太好拿，用标题推断
-              author: m.upper?.name || '',
-              folderName: folder.title,
-            })
-          }
-        } catch { /* skip folder */ }
-      }
-    } catch (e) {
-      console.error('[ProfileAnalysis] 收藏夹获取失败:', e.message)
-    }
-
-    // 3. 统计分区分布
-    const allItems = [...results.history]
-    for (const item of allItems) {
-      const cat = item.tname || '未知'
-      results.categories[cat] = (results.categories[cat] || 0) + 1
-    }
-
-    // 4. 生成摘要文本
-    const catEntries = Object.entries(results.categories).sort((a, b) => b[1] - a[1])
-    const topCategories = catEntries.slice(0, 5).map(([name, count]) => `${name}(${count}次)`).join('、')
-
-    const historyTitles = results.history.slice(0, 10).map(h => h.title).join('、')
-    const favTitles = results.favorites.slice(0, 10).map(f => `「${f.title}」(${f.folderName})`).join('、')
-
-    const summary = [
-      topCategories ? `常看分区: ${topCategories}` : '',
-      historyTitles ? `最近在看: ${historyTitles}` : '',
-      favTitles ? `收藏内容: ${favTitles}` : '',
-    ].filter(Boolean).join('\n')
-
-    console.log(`[ProfileAnalysis] 历史${results.history.length}条，收藏${results.favorites.length}条，分区${catEntries.length}个`)
-    res.json({ success: true, summary, categories: results.categories })
-
-  } catch (error) {
-    console.error('[ProfileAnalysis] 失败:', error.message)
-    res.json({ success: false, error: error.message })
-  }
-})
-
-
-// ==================== 视频字幕抓取 ====================
-// 获取 B 站 AI 视频总结
-app.get('/api/video/ai-summary', async (req, res) => {
-  try {
-    const { bvid, cid, up_mid } = req.query
-    if (!bvid || !cid) return res.status(400).json({ success: false, error: '缺少 bvid 或 cid' })
-
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Referer': 'https://www.bilibili.com/',
-    }
-    // 带上登录态，部分视频可能需要
-    const sessionId = req.cookies?.bili_session
-    if (sessionId && loginSessions.has(sessionId)) {
-      const cookies = loginSessions.get(sessionId).cookies
-      headers['Cookie'] = `SESSDATA=${cookies.SESSDATA}; bili_jct=${cookies.bili_jct}; DedeUserID=${cookies.DedeUserID}`
-    }
-
-    let url = `https://api.bilibili.com/x/web-interface/view/conclusion/get?bvid=${bvid}&cid=${cid}`
-    if (up_mid) url += `&up_mid=${up_mid}`
-
-    const apiRes = await axios.get(url, { headers, timeout: 10000 })
-    const data = apiRes.data?.data
-
-    if (apiRes.data?.code !== 0 || !data?.model_result) {
-      return res.json({ success: true, summary: '', available: false })
-    }
-
-    // model_result 包含 summary 字段（文本摘要）和 outline 字段（分段大纲）
-    const result = data.model_result
-    let summaryText = result.summary || ''
-
-    // 如果有分段大纲，拼接为更详细的结构
-    if (result.outline && result.outline.length > 0) {
-      const outlineText = result.outline.map(section => {
-        const parts = section.part_outline?.map(p => `  • ${p.content}`).join('\n') || ''
-        return `【${section.title}】\n${parts}`
-      }).join('\n')
-      if (outlineText) summaryText += '\n\n' + outlineText
-    }
-
-    console.log(`[AISummary] ${bvid}: ${summaryText ? '成功' : '无内容'}`)
-    res.json({ success: true, summary: summaryText, available: !!summaryText })
-  } catch (error) {
-    console.error('[AISummary] 获取失败:', error.message)
-    res.json({ success: true, summary: '', available: false })
-  }
-})
-
-app.get('/api/video/subtitle', async (req, res) => {
-  try {
-    const { bvid, cid } = req.query
-    if (!bvid || !cid) return res.status(400).json({ success: false, error: '缺少 bvid 或 cid' })
-
-    const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      'Referer': 'https://www.bilibili.com/',
-    }
-    const sessionId = req.cookies?.bili_session
-    if (sessionId && loginSessions.has(sessionId)) {
-      const cookies = loginSessions.get(sessionId).cookies
-      headers['Cookie'] = `SESSDATA=${cookies.SESSDATA}; bili_jct=${cookies.bili_jct}; DedeUserID=${cookies.DedeUserID}`
-    }
-
-    const playerRes = await axios.get(
-      `https://api.bilibili.com/x/player/v2?bvid=${bvid}&cid=${cid}`,
-      { headers, timeout: 10000 }
-    )
-    const subtitles = playerRes.data?.data?.subtitle?.subtitles
-    if (!subtitles || subtitles.length === 0) {
-      return res.json({ success: true, text: '' })
-    }
-
-    let targetSub = subtitles.find(s => s.lan === 'zh-CN' || s.lan === 'ai-zh')
-      || subtitles.find(s => s.lan.startsWith('zh'))
-      || subtitles[0]
-
-    let subUrl = targetSub.subtitle_url
-    if (subUrl.startsWith('//')) subUrl = 'https:' + subUrl
-
-    const subRes = await axios.get(subUrl, { headers, timeout: 10000 })
-    const body = subRes.data?.body || subRes.data
-    if (!Array.isArray(body)) return res.json({ success: true, text: '' })
-
-    const fullText = body.map(item => item.content).join(' ')
-    const text = fullText.length > 3000 ? fullText.slice(0, 3000) + '…' : fullText
-    res.json({ success: true, text, lang: targetSub.lan })
-  } catch (error) {
-    console.error('[Subtitle] 失败:', error.message)
-    res.json({ success: true, text: '' })
-  }
-})
-
-// ==================== 弹幕下载 ====================
-app.get('/api/bilibili/danmaku/:cid', async (req, res) => {
-  try {
-    const { cid } = req.params
-    const response = await axios.get(`https://comment.bilibili.com/${cid}.xml`, {
-      responseType: 'arraybuffer',
-      headers: BILIBILI_HEADERS,
-      decompress: true,
-    })
-    res.setHeader('Content-Type', 'application/xml; charset=utf-8')
-    res.setHeader('Content-Disposition', `attachment; filename="danmaku_${cid}.xml"`)
-    res.send(response.data)
-  } catch (error) {
-    console.error('[Danmaku] 获取失败:', error.message)
-    res.status(500).json({ success: false, error: '弹幕获取失败' })
-  }
-})
-
-// ==================== 头像代理 ====================
-// [安全] 头像域名白名单，防止 SSRF
-const AVATAR_ALLOWED_HOSTS = ['i0.hdslb.com', 'i1.hdslb.com', 'i2.hdslb.com', 'hdslb.com', 'static.hdslb.com']
-app.get('/api/proxy/avatar', async (req, res) => {
-  try {
-    const { url } = req.query
-    if (!url) return res.status(400).send('缺少 url 参数')
-    // [安全] 验证头像 URL 域名
-    try {
-      const hostname = new URL(url).hostname
-      if (!AVATAR_ALLOWED_HOSTS.some(h => hostname === h || hostname.endsWith('.' + h))) {
-        return res.status(403).send('不允许代理此域名')
-      }
-    } catch { return res.status(400).send('URL 格式错误') }
-    const response = await axios.get(url, {
-      responseType: 'arraybuffer',
-      timeout: 10000,
-      headers: BILIBILI_HEADERS,
-    })
-    res.set('Content-Type', response.headers['content-type'] || 'image/jpeg')
-    res.set('Cache-Control', 'public, max-age=86400')
-    res.send(response.data)
-  } catch (error) {
-    console.error('[Avatar] 代理失败:', error.message)
-    res.status(502).send('头像加载失败')
-  }
-})
-
-// ==================== 路由模块注册 ====================
 // 管理面板（通告 + 看板 + 页面）
 const adminRoutes = require('./routes/admin')
 app.use('/api', adminRoutes)
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')))
 app.get('/admin/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'dashboard.html')))
 
-// 音乐播放器 API
+// 音乐播放器
 const musicRoutes = require('./routes/music')
 app.use('/api', musicRoutes)
 
@@ -1288,9 +130,26 @@ registerVideoAnalysis(app)
 const live2dRoutes = require('./routes/live2d')
 app.use('/api/live2d', live2dRoutes)
 
+// ==================== 生产模式：托管前端构建产物 ====================
+const fs = require('fs')
+const distPath = path.join(__dirname, '..', 'dist')
+if (fs.existsSync(distPath)) {
+  console.log('[PROD] 检测到 dist/ 目录，启用静态文件托管')
+  app.use(express.static(distPath))
+  // SPA 回退：所有非 API 路由返回 index.html
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api') && !req.path.startsWith('/admin')) {
+      res.sendFile(path.join(distPath, 'index.html'))
+    }
+  })
+}
+
 // ==================== 启动 ====================
 app.listen(PORT, () => {
   console.log(`\n🚀 后端服务已启动: http://localhost:${PORT}`)
   console.log(`📡 API 端点: /api/bilibili/qrcode, /api/parse`)
+  if (fs.existsSync(distPath)) {
+    console.log(`🌐 前端: http://localhost:${PORT} (生产模式)`)
+  }
   console.log()
 })

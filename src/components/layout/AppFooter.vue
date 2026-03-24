@@ -316,4 +316,28 @@ const showFeedback = ref(false)
     transform: translateY(0);
   }
 }
+
+// 移动端适配
+@media (max-width: 767px) {
+  .modal-card {
+    width: 95%;
+    border-radius: 12px;
+  }
+  .modal-header {
+    padding: 14px 16px;
+    h3 { font-size: 1rem; }
+  }
+  .modal-body {
+    padding: 16px;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    &.scrollable { max-height: 60vh; }
+    h4 { font-size: 0.9rem; }
+  }
+  .modal-footer { padding: 10px 16px 14px; }
+  .modal-btn {
+    width: 100%;
+    padding: 10px;
+  }
+}
 </style>

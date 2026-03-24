@@ -68,13 +68,11 @@ export const QUALITY_OPTIONS: QualityOption[] = [
 ]
 
 // 处理方式
-export type FormatType = 'video+audio' | 'video+audio-separate' | 'audio' | 'video-only' | 'cover'
+export type FormatType = 'video+audio' | 'audio' | 'cover'
 
 export const FORMAT_OPTIONS: { value: FormatType; label: string }[] = [
   { value: 'video+audio', label: '完整' },
-  { value: 'video+audio-separate', label: '分离' },
   { value: 'audio', label: '仅音频' },
-  { value: 'video-only', label: '仅视频' },
   { value: 'cover', label: '封面' },
 ]
 

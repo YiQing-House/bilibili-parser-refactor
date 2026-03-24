@@ -497,8 +497,8 @@ onUnmounted(() => {
 @media (max-width: 768px) {
   .side-buttons {
     right: 8px;
-    bottom: 80px; // 避免与底部搜索栏重叠
-    gap: 8px;
+    bottom: 100px; // 避免与底部搜索栏重叠
+    gap: 10px;
   }
   .side-btn {
     width: 36px;
@@ -518,5 +518,30 @@ onUnmounted(() => {
 }
 #waifu canvas {
   transition: opacity 0.3s ease;
+}
+
+// 移动端：通告弹窗适配 + Live2D 隐藏
+@media (max-width: 767px) {
+  .ann-card {
+    width: 95%;
+    border-radius: 12px;
+  }
+  .ann-header {
+    padding: 12px 16px;
+    h3 { font-size: 0.95rem; }
+  }
+  .ann-body {
+    padding: 12px 16px;
+    font-size: 0.85rem;
+    max-height: 60vh;
+  }
+  .ann-footer { padding: 8px 16px 12px; }
+  .ann-btn {
+    width: 100%;
+    padding: 10px;
+  }
+
+  #waifu { display: none !important; }
+  #waifu-chat-box { display: none !important; }
 }
 </style>

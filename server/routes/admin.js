@@ -56,6 +56,45 @@ router.post('/admin/announcement', (req, res) => {
   res.json({ success: true, data: item })
 })
 
+// 管理接口：编辑通告（标题/内容/启用状态）
+router.put('/admin/announcement/:id', (req, res) => {
+  const { password, title, content, enabled } = req.body
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(403).json({ success: false, error: 'wrong password' })
+  }
+  const all = readAnnouncements()
+  const idx = all.findIndex(a => a.id === req.params.id)
+  if (idx === -1) return res.status(404).json({ success: false, error: '通告不存在' })
+
+  // 只更新传入的字段
+  if (title !== undefined) all[idx].title = title
+  if (content !== undefined) all[idx].content = content
+  if (enabled !== undefined) all[idx].enabled = !!enabled
+  all[idx].updatedAt = new Date().toISOString()
+
+  writeAnnouncements(all)
+  console.log(`[Announcement] updated: ${all[idx].title} (enabled=${all[idx].enabled})`)
+  res.json({ success: true, data: all[idx] })
+})
+
+// 管理接口：切换通告启用状态（快捷接口）
+router.patch('/admin/announcement/:id/toggle', (req, res) => {
+  const { password } = req.body
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(403).json({ success: false, error: 'wrong password' })
+  }
+  const all = readAnnouncements()
+  const idx = all.findIndex(a => a.id === req.params.id)
+  if (idx === -1) return res.status(404).json({ success: false, error: '通告不存在' })
+
+  all[idx].enabled = !all[idx].enabled
+  all[idx].updatedAt = new Date().toISOString()
+
+  writeAnnouncements(all)
+  console.log(`[Announcement] toggled: ${all[idx].title} -> ${all[idx].enabled ? '启用' : '禁用'}`)
+  res.json({ success: true, data: all[idx] })
+})
+
 // 管理接口：删除通告
 router.delete('/admin/announcement/:id', (req, res) => {
   const { password } = req.query

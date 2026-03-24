@@ -328,21 +328,22 @@ function retry() { const u = videoStore.inputUrl.trim(); if (u) videoStore.smart
     max-width: 100%;
   }
 
-  :deep(.hero-search__bar) {
+  :deep(.hero-search__card) {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     background: rgba(255, 255, 255, 0.05);
     border-color: rgba(255, 255, 255, 0.08);
     box-shadow: none;
     animation: none;
-    min-height: 46px;
-    margin: 0 8px;
-    width: calc(100% - 16px);
 
     &.focused, &.hasValue {
       background: rgba(255, 255, 255, 0.08);
       box-shadow: 0 0 0 1px var(--color-border-focus);
     }
+  }
+
+  :deep(.hero-search__bar) {
+    min-height: 46px;
   }
 
   :deep(.hero-search__tools) {

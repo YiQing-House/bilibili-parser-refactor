@@ -212,6 +212,8 @@ function handleDownloadAllPages() {
 </script>
 
 <style lang="scss" scoped>
+@use '@/styles/mixins' as *;
+
 .rr {
   display: flex;
   flex-wrap: wrap;
