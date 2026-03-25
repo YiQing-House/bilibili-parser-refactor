@@ -61,6 +61,9 @@
     .act-btn[data-action="toggle"] { border: 1px solid rgba(46,213,115,0.3); color: #2ed573; }
     .act-btn[data-action="toggle"].off { border-color: rgba(136,136,136,0.3); color: #888; }
     .act-btn[data-action="toggle"]:hover { background: rgba(46,213,115,0.1); }
+    .act-btn[data-action="up"], .act-btn[data-action="down"] { border: 1px solid rgba(255,255,255,0.15); color: #aaa; font-size: 0.75rem; padding: 2px 6px; }
+    .act-btn[data-action="up"]:hover, .act-btn[data-action="down"]:hover { background: rgba(255,255,255,0.08); color: #fff; }
+    .act-btn:disabled { opacity: 0.25; cursor: not-allowed; }
     .tag-on { color: #2ed573; } .tag-off { color: #888; }
     .empty { text-align: center; color: #555; padding: 20px; font-size: 0.85rem; }
 
@@ -240,13 +243,15 @@
     function renderHistory(list) {
       const el = document.getElementById('historyList');
       if (!list.length) { el.innerHTML = '<div class="empty">暂无通告</div>'; return; }
-      el.innerHTML = list.map(a => `
+      el.innerHTML = list.map((a, i) => `
         <div class="ann-card-item ${a.enabled ? '' : 'disabled'}" data-id="${a.id}">
-          <div class="title">${esc(a.title || '无标题')}</div>
+          <div class="title"><span style="color:#555;font-size:0.75rem;margin-right:6px">#${i + 1}</span>${esc(a.title || '无标题')}</div>
           <div class="content">${esc(a.content)}</div>
           <div class="meta">
             <span>${new Date(a.updatedAt).toLocaleString('zh-CN')} · <span class="${a.enabled ? 'tag-on' : 'tag-off'}">${a.enabled ? '已启用' : '已禁用'}</span></span>
             <div class="btn-group">
+              <button class="act-btn" data-action="up" data-id="${a.id}" ${i === 0 ? 'disabled' : ''}>▲</button>
+              <button class="act-btn" data-action="down" data-id="${a.id}" ${i === list.length - 1 ? 'disabled' : ''}>▼</button>
               <button class="act-btn ${a.enabled ? '' : 'off'}" data-action="toggle" data-id="${a.id}">${a.enabled ? '禁用' : '启用'}</button>
               <button class="act-btn" data-action="edit" data-id="${a.id}">编辑</button>
               <button class="act-btn" data-action="delete" data-id="${a.id}">删除</button>
@@ -275,6 +280,8 @@
         const ok = await showConfirm('确定删除这条通告？删除后不可恢复。');
         if (!ok) return;
         await delAnn(id);
+      } else if (action === 'up' || action === 'down') {
+        await reorderAnn(id, action);
       }
     });
 
@@ -343,6 +350,23 @@
           await loadHistory();
         } else {
           toast('❌ 删除失败', 'err');
+        }
+      } catch { toast('网络错误', 'err'); }
+    }
+
+    async function reorderAnn(id, direction) {
+      try {
+        const res = await fetch('/api/admin/announcements/reorder', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd, id, direction }),
+        });
+        const json = await res.json();
+        if (json.success) {
+          annDataCache = json.data || [];
+          renderHistory(annDataCache);
+        } else {
+          toast('❌ 排序失败', 'err');
         }
       } catch { toast('网络错误', 'err'); }
     }

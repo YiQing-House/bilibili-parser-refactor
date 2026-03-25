@@ -29,11 +29,10 @@ function writeAnnouncements(list) {
   })
 }
 
-// 公开接口：获取启用通告
+// 公开接口：获取启用通告（按数组顺序 = 自定义排序）
 router.get('/announcement', (req, res) => {
   const all = readAnnouncements()
   const enabled = all.filter(a => a.enabled && a.content)
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
   res.json({ success: true, data: enabled.length ? enabled : null })
 })
 
@@ -107,14 +106,34 @@ router.delete('/admin/announcement/:id', (req, res) => {
   res.json({ success: true })
 })
 
-// 管理接口：获取全部通告
+// 管理接口：获取全部通告（保持数组原始顺序 = 自定义排序）
 router.get('/admin/announcements', (req, res) => {
   const { password } = req.query
   if (password !== ADMIN_PASSWORD) {
     return res.status(403).json({ success: false, error: 'wrong password' })
   }
   const all = readAnnouncements()
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+  res.json({ success: true, data: all })
+})
+
+// 管理接口：重排通告顺序（上移/下移）
+router.patch('/admin/announcements/reorder', (req, res) => {
+  const { password, id, direction } = req.body
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(403).json({ success: false, error: 'wrong password' })
+  }
+  const all = readAnnouncements()
+  const idx = all.findIndex(a => a.id === id)
+  if (idx === -1) return res.status(404).json({ success: false, error: '通告不存在' })
+
+  const newIdx = direction === 'up' ? idx - 1 : idx + 1
+  if (newIdx < 0 || newIdx >= all.length) {
+    return res.json({ success: true, data: all }) // 已在边界，无需移动
+  }
+  // 交换位置
+  ;[all[idx], all[newIdx]] = [all[newIdx], all[idx]]
+  writeAnnouncements(all)
+  console.log(`[Announcement] reorder: ${all[newIdx].title} ${direction}`)
   res.json({ success: true, data: all })
 })
 
