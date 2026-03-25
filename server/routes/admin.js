@@ -24,9 +24,11 @@ function readAnnouncements() {
 }
 
 function writeAnnouncements(list) {
-  fs.writeFile(ANNOUNCEMENT_FILE, JSON.stringify(list, null, 2), 'utf-8', (err) => {
-    if (err) console.error('[Announcement] write error:', err.message)
-  })
+  try {
+    fs.writeFileSync(ANNOUNCEMENT_FILE, JSON.stringify(list, null, 2), 'utf-8')
+  } catch (err) {
+    console.error('[Announcement] write error:', err.message)
+  }
 }
 
 // 公开接口：获取启用通告（按数组顺序 = 自定义排序）
