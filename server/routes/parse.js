@@ -7,6 +7,7 @@ const axios = require('axios')
 const { BILIBILI_HEADERS, getSessionCookies } = require('../helpers/bilibili')
 const multiPlatformService = require('../services/multiPlatformService')
 const ytdlpService = require('../services/ytdlpService')
+const bangumiService = require('../services/bangumiService')
 
 module.exports = function createParseRoutes({ loginSessions, logDownload }) {
   const router = express.Router()
@@ -86,6 +87,7 @@ module.exports = function createParseRoutes({ loginSessions, logDownload }) {
       favorites: info.stat?.favorite, shares: info.stat?.share, replies: info.stat?.reply,
       danmakus: info.stat?.danmaku, bvid: info.bvid, aid: info.aid, cid: info.cid,
       pages: info.pages, maxQuality, qualities,
+      isInteractive: !!(info.interaction || info.rights?.is_stein_gate),
     }
   }
 
@@ -99,6 +101,31 @@ module.exports = function createParseRoutes({ loginSessions, logDownload }) {
 
       const isBiliUrl = /bilibili\.com|b23\.tv|bili2233\.cn|bili22\.cn|bili23\.cn|btv/i.test(url)
       const isBareId = /^(BV[a-zA-Z0-9]{10,}|av\d+)$/i.test(url.trim())
+      const isBareEpSs = /^(ep\d+|ss\d+|md\d+)$/i.test(url.trim())
+
+      // 番剧/电影链接 → 走番剧解析
+      if (isBiliUrl && bangumiService.isBangumiUrl(url) || isBareEpSs) {
+        const finalUrl = isBareEpSs ? url.trim() : url
+        const bangumiId = bangumiService.extractBangumiId(finalUrl)
+        if (bangumiId) {
+          const seasonInfo = await bangumiService.getSeasonInfo(bangumiId, cookies)
+          const targetEp = bangumiId.type === 'ep'
+            ? seasonInfo.episodes.find(ep => ep.epId === bangumiId.id) || seasonInfo.episodes[0]
+            : seasonInfo.episodes[0]
+          let qualities = [], maxQuality = 80
+          if (targetEp) {
+            try {
+              const playInfo = await bangumiService.getPlayUrl(targetEp.epId, targetEp.cid, 120, cookies)
+              qualities = playInfo.qualities
+              maxQuality = playInfo.maxQuality
+            } catch (e) { console.log('[Parse] 番剧画质探测失败:', e.message) }
+          }
+          console.log(`[Parse] 番剧: ${seasonInfo.title} | ${seasonInfo.episodes.length}集`)
+          return res.json({ success: true, data: { platform: '哔哩哔哩', isBangumi: true, ...seasonInfo, maxQuality, qualities, currentEp: targetEp } })
+        }
+      }
+
+      // 普通视频
       if (isBiliUrl || isBareId) {
         const result = await parseBilibiliVideo(url, cookies)
         logDownload(req, { ...result, url }, loginSessions)

@@ -107,6 +107,10 @@ app.use('/api', createUserRoutes(ctx))
 const createVideoRoutes = require('./routes/video')
 app.use('/api', createVideoRoutes(ctx))
 
+// 番剧/电影/纪录片解析
+const createBangumiRoutes = require('./routes/bangumi')
+app.use('/api', createBangumiRoutes(ctx))
+
 // 管理面板（通告 + 看板 + 页面）
 const adminRoutes = require('./routes/admin')
 app.use('/api', adminRoutes)

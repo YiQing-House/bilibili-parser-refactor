@@ -36,6 +36,7 @@
       </button>
       <button v-if="coverSrc" class="rr__btn" @click="downloadCover" title="封面"><i class="fas fa-image"></i></button>
       <button v-if="data.cid" class="rr__btn" @click="downloadDanmaku" title="弹幕"><i class="fas fa-bars-staggered"></i></button>
+      <button v-if="data.cid" class="rr__btn" @click="downloadSubtitle" title="字幕"><i class="fas fa-closed-captioning"></i></button>
       <button v-if="isMultiP" class="rr__btn" @click="pagesExpanded = !pagesExpanded" :title="pagesExpanded ? '收起分P' : '展开分P'">
         <i :class="pagesExpanded ? 'fas fa-chevron-up' : 'fas fa-list-ol'"></i>
       </button>
@@ -68,7 +69,7 @@ import { QUALITY_MAP } from '@/types/video'
 import { useAppStore } from '@/stores/app'
 import { useDownloadStore } from '@/stores/download'
 import { useVideoStore } from '@/stores/video'
-import { buildCoverUrl, buildStreamUrl, buildDownloadUrl } from '@/services/bilibili'
+import { buildStreamUrl, buildDownloadUrl } from '@/services/bilibili'
 
 const props = defineProps<{ data: VideoData }>()
 const emit = defineEmits<{ (e: 'toast', msg: string, type: string): void }>()
@@ -144,9 +145,13 @@ function handleDownload() {
 }
 
 function downloadCover() {
-  const url = videoStore.inputUrl.trim()
-  if (!url) return
-  downloadStore.directDownload(buildCoverUrl(url), `${sanitize(props.data.title || 'cover')}.jpg`)
+  const pic = props.data.cover || props.data.thumbnail
+  if (!pic) return
+  const title = sanitize(props.data.title || 'cover')
+  downloadStore.directDownload(
+    `/api/video/cover?url=${encodeURIComponent(pic)}&title=${encodeURIComponent(title)}`,
+    `${title}_封面.jpg`
+  )
   emit('toast', '封面下载已开始', 'success')
 }
 
@@ -167,6 +172,17 @@ function downloadDanmaku() {
   if (!cid) return
   downloadStore.directDownload(`/api/bilibili/danmaku/${cid}`, `${sanitize(props.data.title || 'danmaku')}_弹幕.xml`)
   emit('toast', '弹幕下载已开始', 'success')
+}
+
+function downloadSubtitle() {
+  const bvid = props.data.bvid
+  const cid = props.data.cid
+  if (!bvid || !cid) return
+  downloadStore.directDownload(
+    `/api/video/subtitle/download?bvid=${bvid}&cid=${cid}`,
+    `${sanitize(props.data.title || 'subtitle')}_字幕.srt`
+  )
+  emit('toast', '字幕下载已开始', 'success')
 }
 
 // 多 P 支持

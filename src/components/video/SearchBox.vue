@@ -10,7 +10,7 @@
           class="hero-search__input"
           v-model="videoStore.inputUrl"
           rows="1"
-          placeholder="粘贴视频链接，开始解析...（Shift+Enter 换行 | 支持拖拽）"
+          placeholder="粘贴视频/番剧链接，开始解析...（支持 BV/AV/ep/ss 号 | Shift+Enter 换行）"
           @focus="isFocused = true"
           @blur="isFocused = false"
           @keydown="onKeydown"
