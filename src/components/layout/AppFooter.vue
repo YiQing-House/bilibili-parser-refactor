@@ -177,6 +177,11 @@ const showFeedback = ref(false)
     color: var(--color-text-secondary);
     opacity: 0.6;
   }
+
+  // 移动端：增加底部间距，避免与搜索框/侧边按钮重叠
+  @media (max-width: 767px) {
+    padding-bottom: calc(var(--spacing-lg) + 20px);
+  }
 }
 </style>
 

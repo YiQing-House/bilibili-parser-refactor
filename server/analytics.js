@@ -97,10 +97,32 @@ function _debounceSave(date, log) {
 }
 
 function accessLogger(loginSessions) {
+  // 只记录有业务意义的 API 路径
+  const TRACK_PREFIXES = [
+    '/api/parse',      // 视频解析
+    '/api/download',   // 下载
+    '/api/music',      // 音乐
+    '/api/bilibili',   // B站API（排除轮询）
+    '/api/admin',      // 管理操作
+    '/api/user',       // 用户操作
+  ]
+  // 即使命中 TRACK_PREFIXES，仍跳过这些高频轮询
+  const SKIP_EXACT = [
+    '/api/bilibili/qrcode/check',
+    '/api/health',
+    '/api/announcement',
+  ]
+
   return (req, res, next) => {
-    const skip = ['/api/bilibili/qrcode/check', '/api/health', '/api/announcement', '/favicon.ico']
-    if (skip.some(p => req.path.startsWith(p))) return next()
-    if (req.path.match(/\.(js|css|png|jpg|svg|woff|ico|map)$/)) return next()
+    const p = req.path
+    // 跳过静态资源
+    if (p.match(/\.(js|css|png|jpg|svg|woff|ico|map|json|webp|gif)$/)) return next()
+    // 跳过高频轮询
+    if (SKIP_EXACT.some(s => p.startsWith(s))) return next()
+    // 跳过 favicon
+    if (p === '/favicon.ico') return next()
+    // 只记录有业务意义的路径
+    if (!TRACK_PREFIXES.some(prefix => p.startsWith(prefix))) return next()
 
     const ip = getClientIP(req)
     const ua = req.headers['user-agent'] || ''

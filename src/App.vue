@@ -543,5 +543,9 @@ onUnmounted(() => {
 
   #waifu { display: none !important; }
   #waifu-chat-box { display: none !important; }
+
+  // 移动端隐藏音乐播放器（减少兼容性/布局问题）
+  .side-btn--music { display: none !important; }
+  .aplayer, .aplayer-fixed, [id*="aplayer"] { display: none !important; }
 }
 </style>

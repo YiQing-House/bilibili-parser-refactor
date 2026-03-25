@@ -6,10 +6,25 @@
   <title>通告管理 - 视频去水印助手</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e0e0e0; min-height: 100vh; display: flex; justify-content: center; padding: 40px 16px; }
-    .wrap { width: 520px; max-width: 100%; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a1a; color: #e0e0e0; min-height: 100vh; }
+
+    /* 密码门控 */
+    .pwd-gate { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .pwd-card { background: #1a1a2e; border: 1px solid #333; border-radius: 16px; padding: 32px; width: 360px; text-align: center; }
+    .pwd-card h2 { font-size: 1.2rem; margin-bottom: 20px; color: #fb7299; }
+    .pwd-card input { width: 100%; padding: 10px 14px; background: #16213e; border: 1px solid #333; border-radius: 8px; color: #e0e0e0; font-size: 0.95rem; outline: none; text-align: center; margin-bottom: 16px; }
+    .pwd-card input:focus { border-color: #fb7299; }
+    .pwd-card button { padding: 10px 24px; background: linear-gradient(135deg, #fb7299, #e91e63); color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
+    .pwd-card .err { color: #ff4757; font-size: 0.8rem; margin-top: 8px; }
+
+    /* 管理主体 */
+    .topbar { background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; flex-wrap: wrap; gap: 10px; }
+    .topbar h1 { font-size: 1.2rem; background: linear-gradient(135deg, #fb7299, #00a1d6); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+    .topbar a { color: #00a1d6; text-decoration: none; font-size: 0.85rem; }
+    .topbar a:hover { text-decoration: underline; }
+
+    .wrap { max-width: 600px; margin: 0 auto; padding: 20px 16px; }
     .card { background: #1a1a2e; border: 1px solid #333; border-radius: 16px; padding: 28px; margin-bottom: 20px; }
-    h1 { font-size: 1.3rem; margin-bottom: 20px; background: linear-gradient(135deg, #fb7299, #00a1d6); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
     h2 { font-size: 1rem; margin-bottom: 14px; color: #ccc; }
     label { display: block; font-size: 0.82rem; color: #999; margin-bottom: 5px; margin-top: 14px; }
     input, textarea { width: 100%; padding: 9px 12px; background: #16213e; border: 1px solid #333; border-radius: 8px; color: #e0e0e0; font-size: 0.9rem; outline: none; font-family: inherit; }
@@ -22,28 +37,33 @@
     .toggle.on::after { transform: translateX(18px); }
     .btn { display: block; width: 100%; margin-top: 20px; padding: 10px; background: linear-gradient(135deg, #fb7299, #e91e63); color: white; border: none; border-radius: 8px; font-size: 0.95rem; cursor: pointer; }
     .btn:hover { opacity: 0.9; } .btn:disabled { opacity: 0.5; }
-    .msg { margin-top: 10px; padding: 8px; border-radius: 6px; font-size: 0.82rem; text-align: center; display: none; }
-    .msg.ok { display: block; background: rgba(46,213,115,0.15); color: #2ed573; }
-    .msg.err { display: block; background: rgba(255,71,87,0.15); color: #ff4757; }
-    .links { display: flex; gap: 14px; margin-bottom: 20px; font-size: 0.85rem; }
-    .links a { color: #00a1d6; text-decoration: none; } .links a:hover { text-decoration: underline; }
+
+    /* Toast 通知 */
+    .toast { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); padding: 10px 24px; border-radius: 8px; font-size: 0.85rem; z-index: 9999; animation: toastIn 0.3s ease; pointer-events: none; }
+    .toast.ok { background: rgba(46,213,115,0.9); color: #fff; }
+    .toast.err { background: rgba(255,71,87,0.9); color: #fff; }
+    .toast.info { background: rgba(0,161,214,0.9); color: #fff; }
+    @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(-10px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+    /* 通告卡片 */
     .ann-list { display: flex; flex-direction: column; gap: 10px; }
-    .ann-card-item { background: #16213e; border: 1px solid #262640; border-radius: 10px; padding: 14px; position: relative; }
+    .ann-card-item { background: #16213e; border: 1px solid #262640; border-radius: 10px; padding: 14px; position: relative; transition: opacity 0.2s; }
     .ann-card-item.disabled { opacity: 0.5; }
     .ann-card-item .title { font-weight: 600; color: #fb7299; font-size: 0.9rem; margin-bottom: 4px; }
     .ann-card-item .content { font-size: 0.8rem; color: #aaa; line-height: 1.5; margin-bottom: 6px; white-space: pre-line; max-height: 60px; overflow: hidden; }
     .ann-card-item .meta { font-size: 0.7rem; color: #666; display: flex; justify-content: space-between; align-items: center; }
-    .del-btn, .edit-btn, .toggle-btn { background: none; padding: 2px 10px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; }
-    .del-btn { border: 1px solid rgba(255,71,87,0.3); color: #ff4757; }
-    .del-btn:hover { background: rgba(255,71,87,0.1); }
-    .edit-btn { border: 1px solid rgba(0,161,214,0.3); color: #00a1d6; }
-    .edit-btn:hover { background: rgba(0,161,214,0.1); }
-    .toggle-btn { border: 1px solid rgba(46,213,115,0.3); color: #2ed573; }
-    .toggle-btn.off { border-color: rgba(136,136,136,0.3); color: #888; }
-    .toggle-btn:hover { background: rgba(46,213,115,0.1); }
+    .btn-group { display: flex; gap: 6px; }
+    .act-btn { background: none; padding: 2px 10px; border-radius: 4px; cursor: pointer; font-size: 0.7rem; }
+    .act-btn[data-action="delete"] { border: 1px solid rgba(255,71,87,0.3); color: #ff4757; }
+    .act-btn[data-action="delete"]:hover { background: rgba(255,71,87,0.1); }
+    .act-btn[data-action="edit"] { border: 1px solid rgba(0,161,214,0.3); color: #00a1d6; }
+    .act-btn[data-action="edit"]:hover { background: rgba(0,161,214,0.1); }
+    .act-btn[data-action="toggle"] { border: 1px solid rgba(46,213,115,0.3); color: #2ed573; }
+    .act-btn[data-action="toggle"].off { border-color: rgba(136,136,136,0.3); color: #888; }
+    .act-btn[data-action="toggle"]:hover { background: rgba(46,213,115,0.1); }
     .tag-on { color: #2ed573; } .tag-off { color: #888; }
     .empty { text-align: center; color: #555; padding: 20px; font-size: 0.85rem; }
-    .btn-group { display: flex; gap: 6px; }
+
     /* 编辑弹窗 */
     .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; }
     .modal { background: #1a1a2e; border: 1px solid #333; border-radius: 16px; padding: 24px; width: 460px; max-width: 90vw; }
@@ -52,44 +72,57 @@
     .modal-btns button { flex: 1; padding: 8px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; border: none; }
     .modal-btns .save { background: linear-gradient(135deg, #fb7299, #e91e63); color: white; }
     .modal-btns .cancel { background: #16213e; border: 1px solid #333; color: #e0e0e0; }
-    .pwd-row { display: flex; gap: 8px; align-items: center; margin-bottom: 16px; }
-    .pwd-row input { flex: 1; }
-    .pwd-row button { padding: 9px 16px; background: #16213e; border: 1px solid #333; color: #e0e0e0; border-radius: 8px; cursor: pointer; font-size: 0.85rem; white-space: nowrap; }
+
+    /* 确认弹窗 */
+    .confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 2000; }
+    .confirm-card { background: #1a1a2e; border: 1px solid #333; border-radius: 12px; padding: 24px; width: 320px; text-align: center; }
+    .confirm-card p { margin-bottom: 20px; font-size: 0.9rem; color: #e0e0e0; }
+    .confirm-btns { display: flex; gap: 10px; }
+    .confirm-btns button { flex: 1; padding: 8px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; border: none; }
+    .confirm-btns .yes { background: #ff4757; color: white; }
+    .confirm-btns .no { background: #16213e; border: 1px solid #333; color: #e0e0e0; }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="links">
-      <a href="/admin/dashboard">📊 数据看板</a>
-      <span style="color:#333">|</span>
-      <span style="color:#fb7299">📢 通告管理</span>
+  <!-- 密码门控 -->
+  <div id="pwdGate" class="pwd-gate">
+    <div class="pwd-card">
+      <h2>📢 通告管理</h2>
+      <input type="password" id="pwdInput" placeholder="输入管理密码" onkeydown="if(event.key==='Enter')unlock()">
+      <br>
+      <button onclick="unlock()">进入管理</button>
+      <div class="err" id="pwdErr"></div>
     </div>
+  </div>
 
-    <!-- 密码输入 -->
-    <div class="card">
+  <!-- 管理主体 -->
+  <div id="mainPanel" style="display:none">
+    <div class="topbar">
       <h1>📢 通告管理</h1>
-      <div class="pwd-row">
-        <input type="password" id="pwd" placeholder="输入管理密码">
-        <button onclick="loadHistory()">加载</button>
-      </div>
-
-      <label>通告标题</label>
-      <input type="text" id="title" placeholder="例如：系统维护通知">
-      <label>通告内容（支持换行）</label>
-      <textarea id="content" placeholder="在这里写通告内容..."></textarea>
-      <div class="row">
-        <div class="toggle on" id="toggle" onclick="this.classList.toggle('on')"></div>
-        <span style="font-size:0.85rem">启用</span>
-      </div>
-      <button class="btn" onclick="publish()">🚀 发布新通告</button>
-      <div class="msg" id="msg"></div>
+      <a href="/admin/dashboard">📊 数据看板 →</a>
     </div>
 
-    <!-- 历史通告 -->
-    <div class="card">
-      <h2>📋 历史通告</h2>
-      <div class="ann-list" id="historyList">
-        <div class="empty">输入密码后点「加载」查看</div>
+    <div class="wrap">
+      <!-- 新增通告 -->
+      <div class="card">
+        <h2>✏️ 发布新通告</h2>
+        <label>通告标题</label>
+        <input type="text" id="title" placeholder="例如：系统维护通知">
+        <label>通告内容（支持换行）</label>
+        <textarea id="content" placeholder="在这里写通告内容..."></textarea>
+        <div class="row">
+          <div class="toggle on" id="toggle" onclick="this.classList.toggle('on')"></div>
+          <span style="font-size:0.85rem">启用</span>
+        </div>
+        <button class="btn" onclick="publish()">🚀 发布通告</button>
+      </div>
+
+      <!-- 历史通告 -->
+      <div class="card">
+        <h2>📋 历史通告</h2>
+        <div class="ann-list" id="historyList">
+          <div class="empty">加载中...</div>
+        </div>
       </div>
     </div>
   </div>
@@ -114,105 +147,207 @@
     </div>
   </div>
 
-  <script>
-    let pwd = '';
+  <!-- 确认弹窗 -->
+  <div class="confirm-overlay" id="confirmModal" style="display:none">
+    <div class="confirm-card">
+      <p id="confirmMsg"></p>
+      <div class="confirm-btns">
+        <button class="no" onclick="confirmResolve(false)">取消</button>
+        <button class="yes" onclick="confirmResolve(true)">确认</button>
+      </div>
+    </div>
+  </div>
 
-    async function loadHistory() {
-      pwd = document.getElementById('pwd').value;
-      if (!pwd) return;
-      try {
-        const res = await fetch('/api/admin/announcements?password=' + encodeURIComponent(pwd));
-        const json = await res.json();
-        if (!json.success) { alert(json.error || '加载失败'); return; }
-        renderHistory(json.data || []);
-      } catch (e) { alert('网络错误'); }
+  <script>
+    // ---- 密码缓存 (sessionStorage + 30分钟过期) ----
+    const PWD_KEY = 'admin_pwd';
+    const PWD_TS_KEY = 'admin_pwd_ts';
+    const PWD_TTL = 30 * 60 * 1000; // 30 分钟
+
+    function savePwd(p) {
+      sessionStorage.setItem(PWD_KEY, p);
+      sessionStorage.setItem(PWD_TS_KEY, Date.now().toString());
+    }
+    function loadPwd() {
+      const p = sessionStorage.getItem(PWD_KEY);
+      const ts = parseInt(sessionStorage.getItem(PWD_TS_KEY) || '0');
+      if (p && (Date.now() - ts < PWD_TTL)) return p;
+      sessionStorage.removeItem(PWD_KEY);
+      sessionStorage.removeItem(PWD_TS_KEY);
+      return null;
     }
 
+    let pwd = '';
+    let annDataCache = [];
+
+    // ---- 自动登录 ----
+    (function autoLogin() {
+      const cached = loadPwd();
+      if (cached) {
+        pwd = cached;
+        verifyAndEnter(pwd);
+      }
+    })();
+
+    function unlock() {
+      pwd = document.getElementById('pwdInput').value;
+      if (!pwd) { document.getElementById('pwdErr').textContent = '请输入密码'; return; }
+      verifyAndEnter(pwd);
+    }
+
+    async function verifyAndEnter(p) {
+      try {
+        const res = await fetch('/api/admin/announcements?password=' + encodeURIComponent(p));
+        const json = await res.json();
+        if (json.success) {
+          pwd = p;
+          savePwd(p);
+          document.getElementById('pwdGate').style.display = 'none';
+          document.getElementById('mainPanel').style.display = 'block';
+          annDataCache = json.data || [];
+          renderHistory(annDataCache);
+        } else {
+          document.getElementById('pwdErr').textContent = '密码错误';
+        }
+      } catch {
+        document.getElementById('pwdErr').textContent = '无法连接服务器';
+      }
+    }
+
+    // ---- Toast 通知 ----
+    function toast(msg, type = 'info') {
+      const el = document.createElement('div');
+      el.className = 'toast ' + type;
+      el.textContent = msg;
+      document.body.appendChild(el);
+      setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 2000);
+    }
+
+    // ---- 自定义确认弹窗 ----
+    let confirmResolve = () => {};
+    function showConfirm(msg) {
+      return new Promise(resolve => {
+        document.getElementById('confirmMsg').textContent = msg;
+        document.getElementById('confirmModal').style.display = 'flex';
+        confirmResolve = (val) => {
+          document.getElementById('confirmModal').style.display = 'none';
+          resolve(val);
+        };
+      });
+    }
+
+    // ---- 通告列表渲染 ----
     function renderHistory(list) {
       const el = document.getElementById('historyList');
       if (!list.length) { el.innerHTML = '<div class="empty">暂无通告</div>'; return; }
       el.innerHTML = list.map(a => `
-        <div class="ann-card-item ${a.enabled ? '' : 'disabled'}">
+        <div class="ann-card-item ${a.enabled ? '' : 'disabled'}" data-id="${a.id}">
           <div class="title">${esc(a.title || '无标题')}</div>
           <div class="content">${esc(a.content)}</div>
           <div class="meta">
             <span>${new Date(a.updatedAt).toLocaleString('zh-CN')} · <span class="${a.enabled ? 'tag-on' : 'tag-off'}">${a.enabled ? '已启用' : '已禁用'}</span></span>
             <div class="btn-group">
-              <button class="toggle-btn ${a.enabled ? '' : 'off'}" onclick="toggleAnn('${a.id}')">${a.enabled ? '禁用' : '启用'}</button>
-              <button class="edit-btn" onclick="editAnn('${a.id}','${esc(a.title)}','${esc(a.content).replace(/'/g,'\\&#39;')}',${a.enabled})">编辑</button>
-              <button class="del-btn" onclick="delAnn('${a.id}')">删除</button>
+              <button class="act-btn ${a.enabled ? '' : 'off'}" data-action="toggle" data-id="${a.id}">${a.enabled ? '禁用' : '启用'}</button>
+              <button class="act-btn" data-action="edit" data-id="${a.id}">编辑</button>
+              <button class="act-btn" data-action="delete" data-id="${a.id}">删除</button>
             </div>
           </div>
         </div>
       `).join('');
     }
 
+    // ---- 事件委托：统一处理按钮点击 ----
+    document.getElementById('historyList').addEventListener('click', async (e) => {
+      const btn = e.target.closest('[data-action]');
+      if (!btn) return;
+      const action = btn.dataset.action;
+      const id = btn.dataset.id;
+
+      if (action === 'edit') {
+        editAnn(id);
+      } else if (action === 'toggle') {
+        const item = annDataCache.find(a => a.id === id);
+        const label = item?.enabled ? '禁用' : '启用';
+        const ok = await showConfirm(`确定${label}这条通告？`);
+        if (!ok) return;
+        await toggleAnn(id);
+      } else if (action === 'delete') {
+        const ok = await showConfirm('确定删除这条通告？删除后不可恢复。');
+        if (!ok) return;
+        await delAnn(id);
+      }
+    });
+
+    // ---- API 操作 ----
+    async function loadHistory() {
+      try {
+        const res = await fetch('/api/admin/announcements?password=' + encodeURIComponent(pwd));
+        const json = await res.json();
+        if (json.success) {
+          annDataCache = json.data || [];
+          renderHistory(annDataCache);
+        }
+      } catch { toast('加载失败', 'err'); }
+    }
+
     async function publish() {
-      pwd = document.getElementById('pwd').value;
-      const msgEl = document.getElementById('msg');
-      msgEl.className = 'msg';
-      if (!pwd) { msgEl.className = 'msg err'; msgEl.textContent = '请输入密码'; return; }
+      if (!pwd) { toast('未验证密码', 'err'); return; }
+      const title = document.getElementById('title').value;
+      const content = document.getElementById('content').value;
+      if (!title && !content) { toast('请填写通告内容', 'err'); return; }
       try {
         const res = await fetch('/api/admin/announcement', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             password: pwd,
-            title: document.getElementById('title').value,
-            content: document.getElementById('content').value,
+            title, content,
             enabled: document.getElementById('toggle').classList.contains('on'),
           }),
         });
         const json = await res.json();
         if (json.success) {
-          msgEl.className = 'msg ok'; msgEl.textContent = '✅ 通告已发布！';
+          toast('✅ 通告已发布', 'ok');
           document.getElementById('title').value = '';
           document.getElementById('content').value = '';
-          loadHistory();
+          await loadHistory();
         } else {
-          msgEl.className = 'msg err'; msgEl.textContent = '❌ ' + (json.error || '发布失败');
+          toast('❌ ' + (json.error || '发布失败'), 'err');
         }
-      } catch (e) { msgEl.className = 'msg err'; msgEl.textContent = '网络错误'; }
+      } catch { toast('网络错误', 'err'); }
     }
 
-    async function delAnn(id) {
-      if (!confirm('确定删除这条通告？')) return;
-      try {
-        await fetch('/api/admin/announcement/' + id + '?password=' + encodeURIComponent(pwd), { method: 'DELETE' });
-        loadHistory();
-      } catch {}
-    }
-
-    function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-
-    // 切换启用/禁用
     async function toggleAnn(id) {
       try {
-        await fetch('/api/admin/announcement/' + id + '/toggle', {
+        const res = await fetch('/api/admin/announcement/' + id + '/toggle', {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ password: pwd }),
         });
-        loadHistory();
-      } catch {}
+        const json = await res.json();
+        if (json.success) {
+          toast('✅ 状态已切换', 'ok');
+          await loadHistory();
+        } else {
+          toast('❌ 操作失败', 'err');
+        }
+      } catch { toast('网络错误', 'err'); }
     }
 
-    // 打开编辑弹窗
-    let annDataCache = [];
-    const origLoadHistory = loadHistory;
-    // 覆盖 loadHistory 以缓存数据
-    loadHistory = async function() {
-      pwd = document.getElementById('pwd').value;
-      if (!pwd) return;
+    async function delAnn(id) {
       try {
-        const res = await fetch('/api/admin/announcements?password=' + encodeURIComponent(pwd));
+        const res = await fetch('/api/admin/announcement/' + id + '?password=' + encodeURIComponent(pwd), { method: 'DELETE' });
         const json = await res.json();
-        if (!json.success) { alert(json.error || '加载失败'); return; }
-        annDataCache = json.data || [];
-        renderHistory(annDataCache);
-      } catch (e) { alert('网络错误'); }
-    };
+        if (json.success) {
+          toast('✅ 已删除', 'ok');
+          await loadHistory();
+        } else {
+          toast('❌ 删除失败', 'err');
+        }
+      } catch { toast('网络错误', 'err'); }
+    }
 
+    // ---- 编辑弹窗 ----
     function editAnn(id) {
       const item = annDataCache.find(a => a.id === id);
       if (!item) return;
@@ -243,13 +378,16 @@
         });
         const json = await res.json();
         if (json.success) {
+          toast('✅ 保存成功', 'ok');
           closeEdit();
-          loadHistory();
+          await loadHistory();
         } else {
-          alert(json.error || '保存失败');
+          toast('❌ ' + (json.error || '保存失败'), 'err');
         }
-      } catch { alert('网络错误'); }
+      } catch { toast('网络错误', 'err'); }
     }
+
+    function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
   </script>
 </body>
 </html>

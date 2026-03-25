@@ -187,13 +187,38 @@
     let currentRange = 'today';
     let currentData = null;
 
+    // 密码缓存 30 分钟
+    const PWD_KEY = 'admin_pwd';
+    const PWD_TS_KEY = 'admin_pwd_ts';
+    const PWD_TTL = 30 * 60 * 1000;
+    function savePwd(p) { sessionStorage.setItem(PWD_KEY, p); sessionStorage.setItem(PWD_TS_KEY, Date.now().toString()); }
+    function loadPwd() {
+      const p = sessionStorage.getItem(PWD_KEY);
+      const ts = parseInt(sessionStorage.getItem(PWD_TS_KEY) || '0');
+      if (p && (Date.now() - ts < PWD_TTL)) return p;
+      sessionStorage.removeItem(PWD_KEY); sessionStorage.removeItem(PWD_TS_KEY);
+      return null;
+    }
+
+    // 自动登录
+    (function() {
+      const cached = loadPwd();
+      if (cached) { pwd = cached; doUnlock(pwd); }
+    })();
+
     function unlock() {
       pwd = document.getElementById('pwdInput').value;
       if (!pwd) { document.getElementById('pwdErr').textContent = '请输入密码'; return; }
-      fetch('/api/admin/stats?password=' + encodeURIComponent(pwd) + '&range=today')
+      doUnlock(pwd);
+    }
+
+    function doUnlock(p) {
+      fetch('/api/admin/stats?password=' + encodeURIComponent(p) + '&range=today')
         .then(r => r.json())
         .then(d => {
           if (d.success) {
+            pwd = p;
+            savePwd(p);
             document.getElementById('pwdGate').style.display = 'none';
             document.getElementById('dashboard').style.display = 'block';
             currentData = d.data;
