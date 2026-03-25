@@ -274,7 +274,7 @@
 
             var ap = new APlayer({
               container: document.getElementById('aplayer-container'),
-              autoplay: true,
+              autoplay: false,
               volume: 0.4,
               order: 'random',
               loop: 'all',
@@ -318,12 +318,7 @@
               }
             }, 500);
 
-            // 自动播放
-            var played = false;
-            function tryPlay() { if (played) return; ap.play(); played = true; }
-            setTimeout(tryPlay, 2000);
-            document.addEventListener('click', tryPlay, { once: true });
-            document.addEventListener('touchstart', tryPlay, { once: true });
+            // 默认暂停，用户手动点击播放
           })
           .catch(function(e) { console.error('[Music] 加载失败:', e); });
       });
