@@ -152,7 +152,5 @@ router.get('/admin/stats', (req, res) => {
     res.json({ success: true, data: getStats(date) })
   }
 })
-})
 
 module.exports = router
-
