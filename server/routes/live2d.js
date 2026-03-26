@@ -74,12 +74,13 @@ router.get('/model_list.json', (req, res) => {
   res.json({ models, messages })
 })
 
-// 对 evrstr 模型 JSON 注入 layout（统一处理）
+// 对 evrstr 模型 JSON 注入 layout（仅对缺失 layout 的模型补充默认值）
 function injectLayout(buffer) {
   try {
     const modelData = JSON.parse(buffer.toString())
-    if (!modelData.layout || modelData.layout.width > 1.2) {
-      modelData.layout = { center_x: 0, center_y: 0.1, width: 1.0 }
+    if (!modelData.layout) {
+      // 没有 layout 的模型才注入默认值
+      modelData.layout = { center_x: 0, center_y: -0.05, width: 1.6 }
     }
     return Buffer.from(JSON.stringify(modelData))
   } catch {
