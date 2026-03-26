@@ -15,6 +15,11 @@
       <!-- Actions -->
       <div class="header__actions">
 
+        <!-- APP 下载按钮 -->
+        <button class="app-download-btn" @click="showAppModal = true" title="下载 APP">
+          <i class="fas fa-mobile-screen"></i>
+          <span class="app-download-btn__text">APP</span>
+        </button>
 
         <template v-if="authStore.isLoggedIn">
           <div class="user-pill">
@@ -34,17 +39,63 @@
     </div>
 
     <LoginModal v-model:visible="showLoginModal" @login-success="onLoginSuccess" />
+
+    <!-- APP 下载弹窗 -->
+    <Teleport to="body">
+      <div v-if="showAppModal" class="modal-overlay" @click.self="showAppModal = false">
+        <div class="app-modal">
+          <div class="app-modal__header">
+            <h3><i class="fas fa-mobile-screen"></i> 下载 bilibilias</h3>
+            <button class="modal-close" @click="showAppModal = false">✕</button>
+          </div>
+          <div class="app-modal__body">
+            <p class="app-modal__desc">移动端 B 站视频下载工具，支持更多功能</p>
+            <div v-if="appLoading" class="app-modal__loading">
+              <i class="fas fa-spinner fa-spin"></i> 加载中...
+            </div>
+            <div v-else-if="appList.length === 0" class="app-modal__empty">
+              <i class="fas fa-box-open"></i>
+              <p>暂无可用安装包</p>
+            </div>
+            <div v-else class="app-modal__list">
+              <div v-for="app in appList" :key="app.filename" class="app-item">
+                <div class="app-item__icon">
+                  <i class="fab fa-android"></i>
+                </div>
+                <div class="app-item__info">
+                  <div class="app-item__name">
+                    bilibilias
+                    <span :class="['app-item__variant', app.variant]">{{ variantLabel(app.variant) }}</span>
+                  </div>
+                  <div class="app-item__meta">
+                    v{{ app.version }} · {{ app.sizeStr }}
+                  </div>
+                </div>
+                <a :href="'/api/app/download/' + app.filename" class="app-item__download" download>
+                  <i class="fas fa-download"></i>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </header>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import LoginModal from '@/components/common/LoginModal.vue'
 
 const authStore = useAuthStore()
 const showLoginModal = ref(false)
 const isScrolled = ref(false)
+
+// APP 下载
+const showAppModal = ref(false)
+const appList = ref<any[]>([])
+const appLoading = ref(false)
 
 const emit = defineEmits<{
   (e: 'toast', message: string, type: string): void
@@ -71,6 +122,27 @@ async function handleLogout() {
   await authStore.logout()
   emit('toast', '已退出登录', 'info')
 }
+
+function variantLabel(v: string) {
+  const map: Record<string, string> = { official: '正式版', beta: '测试版', alpha: '内测版' }
+  return map[v] || v
+}
+
+// 打开弹窗时加载列表
+watch(showAppModal, async (val) => {
+  if (val && appList.value.length === 0) {
+    appLoading.value = true
+    try {
+      const res = await fetch('/api/app/list')
+      const data = await res.json()
+      appList.value = data.apps || []
+    } catch (e) {
+      console.error('[App] 加载失败:', e)
+    } finally {
+      appLoading.value = false
+    }
+  }
+})
 </script>
 
 <style lang="scss" scoped>
@@ -236,6 +308,158 @@ async function handleLogout() {
   &.active {
     background: linear-gradient(135deg, #FB7299, #FF9B8B);
     color: white;
+  }
+}
+
+// APP 下载按钮
+.app-download-btn {
+  @include btn-reset;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border-radius: var(--radius-full);
+  font-size: 13px;
+  color: #00A1D6;
+  background: rgba(0, 161, 214, 0.08);
+  border: 1px solid rgba(0, 161, 214, 0.15);
+  transition: all var(--transition-fast);
+
+  &:hover {
+    background: rgba(0, 161, 214, 0.18);
+    transform: translateY(-1px);
+  }
+
+  &__text {
+    font-weight: var(--font-weight-medium);
+    @include mobile { display: none; }
+  }
+}
+</style>
+
+<!-- APP 弹窗样式（不加 scoped） -->
+<style lang="scss">
+.app-modal {
+  background: var(--color-bg-card, #1e1e1e);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  width: 90%;
+  max-width: 420px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  animation: slideUp 0.3s ease;
+
+  &__header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, #00A1D6, #3FC9FF);
+
+    h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: white;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+  }
+
+  &__body {
+    padding: 16px 20px 20px;
+  }
+
+  &__desc {
+    color: var(--color-text-secondary, #999);
+    font-size: 0.85rem;
+    margin-bottom: 16px;
+  }
+
+  &__loading, &__empty {
+    text-align: center;
+    padding: 32px 0;
+    color: var(--color-text-secondary, #999);
+
+    i { font-size: 24px; margin-bottom: 8px; display: block; }
+  }
+
+  &__list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+}
+
+.app-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  transition: all 0.15s;
+
+  &:hover { background: rgba(255, 255, 255, 0.08); }
+
+  &__icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, #3DDC84, #2BAE6A);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+
+  &__info { flex: 1; min-width: 0; }
+
+  &__name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--color-text-primary, #e0e0e0);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  &__variant {
+    font-size: 0.7rem;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+
+    &.official { background: rgba(0, 161, 214, 0.15); color: #00A1D6; }
+    &.beta { background: rgba(251, 114, 153, 0.15); color: #FB7299; }
+    &.alpha { background: rgba(255, 152, 0, 0.15); color: #FF9800; }
+  }
+
+  &__meta {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary, #999);
+    margin-top: 2px;
+  }
+
+  &__download {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #00A1D6, #3FC9FF);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 14px;
+    flex-shrink: 0;
+    text-decoration: none;
+    transition: all 0.15s;
+
+    &:hover { transform: scale(1.1); box-shadow: 0 4px 12px rgba(0, 161, 214, 0.3); }
   }
 }
 </style>

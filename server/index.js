@@ -111,6 +111,10 @@ app.use('/api', createVideoRoutes(ctx))
 const createBangumiRoutes = require('./routes/bangumi')
 app.use('/api', createBangumiRoutes(ctx))
 
+// APP 下载
+const appRoutes = require('./routes/app')
+app.use('/api/app', appRoutes)
+
 // 管理面板（通告 + 看板 + 页面）
 const adminRoutes = require('./routes/admin')
 app.use('/api', adminRoutes)
