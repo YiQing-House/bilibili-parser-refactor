@@ -87,6 +87,21 @@
                 </div>
               </div>
             </div>
+
+            <!-- 来源声明 -->
+            <div class="app-modal__footer-info">
+              <p class="app-modal__source">
+                <i class="fab fa-github"></i>
+                本 APP 基于开源项目
+                <a href="https://github.com/1250422131/bilibilias" target="_blank" rel="noopener">bilibilias</a>
+                构建，感谢原作者
+                <a href="https://github.com/1250422131" target="_blank" rel="noopener">@1250422131</a>
+                的开源贡献
+              </p>
+              <p class="app-modal__notice">
+                ⚠️ 原项目已暂停维护，本站提供的版本由我们独立编译分发，后续将持续进行功能优化与兼容性维护。如有问题欢迎反馈。
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -530,6 +545,34 @@ watch(showAppModal, async (val) => {
     color: var(--color-text-secondary, #999);
     line-height: 1.6;
     text-align: center;
+  }
+}
+
+.app-modal__footer-info {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+
+  .app-modal__source {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary, #999);
+    line-height: 1.6;
+
+    i { margin-right: 4px; }
+
+    a {
+      color: #00A1D6;
+      text-decoration: none;
+      &:hover { text-decoration: underline; }
+    }
+  }
+
+  .app-modal__notice {
+    font-size: 0.7rem;
+    color: var(--color-text-secondary, #777);
+    line-height: 1.5;
+    margin-top: 6px;
+    opacity: 0.8;
   }
 }
 </style>
