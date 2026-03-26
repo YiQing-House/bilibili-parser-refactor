@@ -78,7 +78,7 @@
           <div class="ann-body">
             <div v-for="(ann, idx) in announcementList" :key="idx" class="ann-item" :class="{ 'ann-item--first': idx === 0 }">
               <div class="ann-item-title">{{ ann.title || '无标题' }}</div>
-              <p v-for="(line, li) in ann.content.split('\n').filter((l: string) => l.trim())" :key="li">{{ line }}</p>
+              <p v-for="(line, li) in ann.content.split('\n').filter((l: string) => l.trim())" :key="li" v-html="renderAnnLine(line)"></p>
               <div class="ann-time">📅 {{ formatTime(ann.updatedAt) }}</div>
             </div>
             <div v-if="!announcementList.length" class="ann-empty">暂无通告</div>
@@ -127,6 +127,19 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleString('zh-CN')
 }
 
+// 解析通告文本中的 markdown 链接 [text](url) → <a> 标签
+function renderAnnLine(line: string): string {
+  // 先转义 HTML 特殊字符
+  const escaped = line
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  // 再把 [text](url) 转为 <a> 标签
+  return escaped.replace(
+    /\[([^\]]+)\]\((https?:\/\/[^)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener" style="color: #00a1d6; text-decoration: underline;">$1</a>'
+  )
+}
 function showAnnouncement() {
   if (announcementList.value.length) {
     announcementVisible.value = true
