@@ -165,9 +165,13 @@ textarea {
     pointer-events: auto !important;
   }
 
-  // 对话气泡 - 红蓝配色（z-index 高于音乐播放器 250）
+  // 对话气泡 - 红蓝配色
+  // display:block 覆盖 CDN 的 display:none，初始 opacity:0 隐藏
+  // JS 的 showWaifuTips() 会设 opacity:1 触发显示
   #waifu-tips {
     z-index: 300 !important;
+    display: block !important;
+    opacity: 0;
     pointer-events: none;
     background: linear-gradient(135deg, #FB7299 0%, #4A90D9 100%) !important;
     color: #fff !important;
