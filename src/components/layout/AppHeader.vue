@@ -75,6 +75,17 @@
                   <i class="fas fa-download"></i>
                 </a>
               </div>
+
+              <!-- 扫码下载 -->
+              <div class="app-qr">
+                <div class="app-qr__divider">
+                  <span>或 扫码下载</span>
+                </div>
+                <div class="app-qr__content">
+                  <img :src="qrCodeUrl" alt="扫码下载" class="app-qr__img" />
+                  <p class="app-qr__tip">手机扫描二维码<br>直接下载安装</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -84,7 +95,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import LoginModal from '@/components/common/LoginModal.vue'
 
@@ -96,6 +107,14 @@ const isScrolled = ref(false)
 const showAppModal = ref(false)
 const appList = ref<any[]>([])
 const appLoading = ref(false)
+
+// 二维码：指向第一个 APK 的下载链接
+const qrCodeUrl = computed(() => {
+  if (appList.value.length === 0) return ''
+  const downloadPath = `/api/app/download/${appList.value[0].filename}`
+  const fullUrl = `${window.location.origin}${downloadPath}`
+  return `https://api.qrserver.com/v1/create-qr-code/?size=160x160&data=${encodeURIComponent(fullUrl)}`
+})
 
 const emit = defineEmits<{
   (e: 'toast', message: string, type: string): void
@@ -460,6 +479,57 @@ watch(showAppModal, async (val) => {
     transition: all 0.15s;
 
     &:hover { transform: scale(1.1); box-shadow: 0 4px 12px rgba(0, 161, 214, 0.3); }
+  }
+}
+
+.app-qr {
+  margin-top: 12px;
+
+  &__divider {
+    text-align: center;
+    position: relative;
+    margin-bottom: 14px;
+
+    &::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    span {
+      position: relative;
+      background: var(--color-bg-card, #1e1e1e);
+      padding: 0 12px;
+      font-size: 0.75rem;
+      color: var(--color-text-secondary, #999);
+    }
+  }
+
+  &__content {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+  }
+
+  &__img {
+    width: 100px;
+    height: 100px;
+    border-radius: 8px;
+    border: 2px solid rgba(0, 161, 214, 0.2);
+    padding: 4px;
+    background: white;
+  }
+
+  &__tip {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary, #999);
+    line-height: 1.6;
+    text-align: center;
   }
 }
 </style>
