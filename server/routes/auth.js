@@ -46,13 +46,19 @@ module.exports = function createAuthRoutes({ loginSessions }) {
       let isVip = false
       let vipLabel = ''
 
+      console.log('[QR] poll code:', data.code, 'message:', data.message)
+
       switch (data.code) {
         case 0: {
           status = 'confirmed'
+          console.log('[QR] 确认登录, url:', data.url?.substring(0, 80) + '...')
           const urlParams = new URLSearchParams(data.url.split('?')[1])
-          const sessdata = urlParams.get('SESSDATA')
+          const sessdata = decodeURIComponent(urlParams.get('SESSDATA') || '')
           const biliJct = urlParams.get('bili_jct')
           const dedeUserId = urlParams.get('DedeUserID')
+          console.log('[QR] SESSDATA:', sessdata ? `${sessdata.substring(0, 10)}...` : 'NULL')
+          console.log('[QR] bili_jct:', biliJct ? `${biliJct.substring(0, 10)}...` : 'NULL')
+          console.log('[QR] DedeUserID:', dedeUserId)
 
           if (sessdata) {
             const cookies = { SESSDATA: sessdata, bili_jct: biliJct, DedeUserID: dedeUserId }
@@ -64,6 +70,7 @@ module.exports = function createAuthRoutes({ loginSessions }) {
                   'Cookie': `SESSDATA=${sessdata}; bili_jct=${biliJct}; DedeUserID=${dedeUserId}`,
                 },
               })
+              console.log('[QR] nav code:', userRes.data.code)
               if (userRes.data.code === 0) {
                 const u = userRes.data.data
                 const avatarProxy = `/api/proxy/avatar?url=${encodeURIComponent(u.face)}`
@@ -71,6 +78,7 @@ module.exports = function createAuthRoutes({ loginSessions }) {
                 isVip = u.vipStatus === 1
                 const vipTypeMap = { 0: '', 1: '月度大会员', 2: '年度大会员' }
                 vipLabel = vipTypeMap[u.vipType] || (isVip ? '大会员' : '')
+                console.log('[QR] 登录成功:', u.uname, isVip ? `(${vipLabel})` : '')
               }
             } catch (e) {
               console.error('[QR] 获取用户信息失败:', e.message)
@@ -78,7 +86,15 @@ module.exports = function createAuthRoutes({ loginSessions }) {
 
             const sessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
             loginSessions.set(sessionId, { cookies, userInfo, isVip, vipLabel, createdAt: Date.now() })
-            res.cookie('bili_session', sessionId, { httpOnly: true, maxAge: 7 * 24 * 60 * 60 * 1000 })
+            res.cookie('bili_session', sessionId, {
+              httpOnly: true,
+              maxAge: 7 * 24 * 60 * 60 * 1000,
+              path: '/',
+              sameSite: 'lax',
+            })
+            console.log('[QR] session 已创建:', sessionId.substring(0, 20) + '...')
+          } else {
+            console.error('[QR] SESSDATA 为空！无法建立会话')
           }
           break
         }
@@ -89,6 +105,7 @@ module.exports = function createAuthRoutes({ loginSessions }) {
 
       res.json({ success: true, status, userInfo, isVip, vipLabel })
     } catch (error) {
+      console.error('[QR] check 错误:', error.message)
       res.status(500).json({ success: false, error: error.message })
     }
   })

@@ -96,7 +96,8 @@ export const useAuthStore = defineStore('auth', {
               callbacks.onExpired?.()
               break
           }
-        } catch {
+        } catch (err) {
+          console.error('[QR Poll] 轮询出错:', err)
           // 继续轮询
         }
       }, 2000)
