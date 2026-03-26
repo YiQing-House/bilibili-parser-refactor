@@ -78,8 +78,8 @@ router.get('/model_list.json', (req, res) => {
 function injectLayout(buffer) {
   try {
     const modelData = JSON.parse(buffer.toString())
-    if (!modelData.layout || modelData.layout.width > 1.4) {
-      modelData.layout = { center_x: 0, center_y: -0.05, width: 1.2 }
+    if (!modelData.layout || modelData.layout.width > 1.2) {
+      modelData.layout = { center_x: 0, center_y: 0.1, width: 1.0 }
     }
     return Buffer.from(JSON.stringify(modelData))
   } catch {
