@@ -40,6 +40,10 @@ const { registerChatAPI, registerVideoAnalysis } = require('./chat')
 
 // ==================== 中间件 ====================
 
+// [关键] Nginx 反代必须信任代理，否则 express-rate-limit 会因
+// X-Forwarded-For 头抛 ERR_ERL_UNEXPECTED_X_FORWARDED_FOR 拒绝请求
+app.set('trust proxy', 1)
+
 // [安全] CORS 白名单
 const CORS_WHITELIST = [
   'http://localhost:7622',
