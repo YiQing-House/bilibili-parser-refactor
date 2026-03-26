@@ -81,6 +81,12 @@ textarea {
     &.active {
       opacity: 1;
     }
+
+    // 移动端竖屏：背景图完整显示
+    @media (max-width: 767px) {
+      background-size: contain;
+      background-position: center top;
+    }
   }
 
 

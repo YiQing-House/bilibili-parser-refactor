@@ -397,7 +397,7 @@ function retry() { const u = videoStore.inputUrl.trim(); if (u) videoStore.smart
 @include mobile {
   .drawer {
     width: calc(100% - 16px);
-    bottom: 8px;
+    bottom: 50px; // 给 footer 留空间
     border-radius: 14px;
 
     &--batch .drawer__results {
