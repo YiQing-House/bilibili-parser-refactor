@@ -29,8 +29,11 @@ module.exports = function createAuthRoutes({ loginSessions }) {
     }
   })
 
-  // 检查二维码扫描状态
+  // 检查二维码扫描状态（禁止浏览器缓存，否则轮询会用缓存的旧响应）
   router.get('/bilibili/qrcode/check', async (req, res) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+    res.set('Pragma', 'no-cache')
+    res.set('Expires', '0')
     try {
       const { key } = req.query
       if (!key) return res.status(400).json({ success: false, error: '缺少 qrcode_key' })

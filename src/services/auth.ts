@@ -17,7 +17,8 @@ export async function getQRCode(): Promise<QRCodeData> {
  * 检查二维码扫描状态
  */
 export async function checkQRStatus(key: string): Promise<LoginCheckResponse> {
-  const { data } = await api.get('/api/bilibili/qrcode/check', { params: { key } })
+  // 加时间戳防止浏览器缓存 GET 响应
+  const { data } = await api.get('/api/bilibili/qrcode/check', { params: { key, _t: Date.now() } })
   return data
 }
 
