@@ -9,7 +9,7 @@
         <span class="sep">·</span>
         <a href="javascript:void(0)" @click="showFeedback = true">建议反馈</a>
       </div>
-      <p class="footer__copy">视频去水印助手 © 2025 · 仅供技术学习交流</p>
+      <p class="footer__copy">QYBILI © 2026 · 仅供技术学习交流</p>
     </div>
 
     <!-- 关于我们 弹窗 -->

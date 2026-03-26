@@ -114,11 +114,13 @@
       <!-- 新增通告 -->
       <div class="card">
         <h2>✏️ 发布新通告</h2>
-        <label>版本号</label>
-        <input type="text" id="version" placeholder="例如：4.2.1" style="width:120px;display:inline-block;margin-right:10px">
-        <label>日期</label>
-        <input type="date" id="annDate" style="width:160px;display:inline-block">
-        <div style="margin-top:8px;font-size:0.8rem;color:#666">标题预览：<span id="titlePreview" style="color:#fb7299">QYBILI ver ?.?.? (????-??-??)</span></div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div><label>版本号</label><input type="text" id="version" placeholder="4.2.1" style="width:100px"></div>
+          <div><label>日期</label><input type="date" id="annDate" style="width:150px"></div>
+          <button type="button" style="padding:6px 12px;background:#16213e;border:1px solid #fb7299;border-radius:6px;color:#fb7299;cursor:pointer;font-size:0.8rem;height:36px" onclick="genTitle()">✨ 生成标题</button>
+        </div>
+        <label>通告标题（可手动修改）</label>
+        <input type="text" id="title" placeholder="点击“生成标题”或自定义输入">
         <label>通告内容（支持换行）</label>
         <textarea id="content" placeholder="在这里写通告内容..."></textarea>
         <div class="row">
@@ -143,7 +145,12 @@
     <div class="modal">
       <h3>✏️ 编辑通告</h3>
       <input type="hidden" id="editId">
-      <label>标题</label>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div><label>版本号</label><input type="text" id="editVersion" placeholder="4.2.1" style="width:100px"></div>
+        <div><label>日期</label><input type="date" id="editDate" style="width:150px"></div>
+        <button type="button" style="padding:6px 12px;background:#16213e;border:1px solid #fb7299;border-radius:6px;color:#fb7299;cursor:pointer;font-size:0.8rem;height:36px" onclick="genEditTitle()">✨ 生成标题</button>
+      </div>
+      <label>标题（可手动修改）</label>
       <input type="text" id="editTitle">
       <label>内容</label>
       <textarea id="editContent"></textarea>
@@ -317,27 +324,37 @@
       } catch { toast('加载失败', 'err'); }
     }
 
-    // 标题预览实时更新
-    document.getElementById('version').addEventListener('input', updateTitlePreview);
-    document.getElementById('annDate').addEventListener('input', updateTitlePreview);
     // 默认填入今天日期
     document.getElementById('annDate').value = new Date().toISOString().slice(0, 10);
-    updateTitlePreview();
 
-    function updateTitlePreview() {
-      const ver = document.getElementById('version').value || '?.?.?';
-      const date = document.getElementById('annDate').value || '????-??-??';
-      document.getElementById('titlePreview').textContent = `QYBILI ver ${ver} (${date})`;
+    // 生成标题（发布表单）
+    function genTitle() {
+      const ver = document.getElementById('version').value.trim();
+      const date = document.getElementById('annDate').value;
+      if (!ver) { toast('请先填写版本号', 'err'); return; }
+      document.getElementById('title').value = `QYBILI ver ${ver} (${date || new Date().toISOString().slice(0, 10)})`;
+    }
+
+    // 生成标题（编辑弹窗）
+    function genEditTitle() {
+      const ver = document.getElementById('editVersion').value.trim();
+      const date = document.getElementById('editDate').value;
+      if (!ver) { toast('请先填写版本号', 'err'); return; }
+      document.getElementById('editTitle').value = `QYBILI ver ${ver} (${date || new Date().toISOString().slice(0, 10)})`;
+    }
+
+    // 解析标题中的版本号和日期
+    function parseTitle(title) {
+      const m = (title || '').match(/QYBILI\s+ver\s+([\d.]+)\s*\(([\d-]+)\)/);
+      return m ? { version: m[1], date: m[2] } : { version: '', date: '' };
     }
 
     async function publish() {
       if (!pwd) { toast('未验证密码', 'err'); return; }
-      const version = document.getElementById('version').value.trim();
-      const annDate = document.getElementById('annDate').value;
+      const title = document.getElementById('title').value.trim();
       const content = document.getElementById('content').value;
-      if (!version) { toast('请填写版本号', 'err'); return; }
+      if (!title) { toast('请填写或生成标题', 'err'); return; }
       if (!content) { toast('请填写通告内容', 'err'); return; }
-      const title = `QYBILI ver ${version} (${annDate || new Date().toISOString().slice(0, 10)})`;
       try {
         const res = await fetch('/api/admin/announcement', {
           method: 'POST',
@@ -352,6 +369,7 @@
         if (json.success) {
           toast('✅ 通告已发布', 'ok');
           document.getElementById('version').value = '';
+          document.getElementById('title').value = '';
           document.getElementById('content').value = '';
           await loadHistory();
         } else {
@@ -419,6 +437,10 @@
       document.getElementById('editId').value = id;
       document.getElementById('editTitle').value = item.title || '';
       document.getElementById('editContent').value = item.content || '';
+      // 解析已有标题中的版本号和日期
+      const parsed = parseTitle(item.title);
+      document.getElementById('editVersion').value = parsed.version;
+      document.getElementById('editDate').value = parsed.date;
       const tog = document.getElementById('editToggle');
       tog.classList.toggle('on', item.enabled);
       document.getElementById('editModal').style.display = 'flex';

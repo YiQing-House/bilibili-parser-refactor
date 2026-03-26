@@ -9,7 +9,7 @@
           <rect x="4" y="2" width="4" height="4" rx="1" fill="#FB7299" opacity="0.7"/>
           <rect x="16" y="2" width="4" height="4" rx="1" fill="#00A1D6" opacity="0.7"/>
         </svg>
-        <span class="logo-text">视频去水印助手</span>
+        <span class="logo-text">QYBILI</span>
       </a>
 
       <!-- Actions -->
