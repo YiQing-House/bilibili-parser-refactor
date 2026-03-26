@@ -123,6 +123,7 @@
         <input type="text" id="title" placeholder="点击“生成标题”或自定义输入">
         <label>通告内容（支持换行）</label>
         <textarea id="content" placeholder="在这里写通告内容..."></textarea>
+        <button type="button" style="margin-top:8px;padding:6px 14px;background:linear-gradient(135deg,#667eea,#764ba2);border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:0.82rem" onclick="aiRewrite('content','title')">🤖 AI 改写</button>
         <div class="row">
           <div class="toggle on" id="toggle" onclick="this.classList.toggle('on')"></div>
           <span style="font-size:0.85rem">启用</span>
@@ -154,6 +155,7 @@
       <input type="text" id="editTitle">
       <label>内容</label>
       <textarea id="editContent"></textarea>
+      <button type="button" style="margin-top:8px;padding:6px 14px;background:linear-gradient(135deg,#667eea,#764ba2);border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:0.82rem" onclick="aiRewrite('editContent','editTitle')">🤖 AI 改写</button>
       <div class="row">
         <div class="toggle on" id="editToggle" onclick="this.classList.toggle('on')"></div>
         <span style="font-size:0.85rem">启用</span>
@@ -477,6 +479,37 @@
     }
 
     function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+    // AI 改写通告内容
+    async function aiRewrite(contentId, titleId) {
+      const contentEl = document.getElementById(contentId);
+      const raw = contentEl.value.trim();
+      if (!raw) { toast('请先填写内容再改写', 'err'); return; }
+      const title = document.getElementById(titleId)?.value || '';
+      const btn = event.target;
+      const origText = btn.textContent;
+      btn.textContent = '✨ AI 改写中...';
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/admin/ai-rewrite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd, content: raw, title }),
+        });
+        const json = await res.json();
+        if (json.success && json.data) {
+          contentEl.value = json.data;
+          toast('✨ AI 改写完成', 'ok');
+        } else {
+          toast('❌ ' + (json.error || '改写失败'), 'err');
+        }
+      } catch {
+        toast('网络错误', 'err');
+      } finally {
+        btn.textContent = origText;
+        btn.disabled = false;
+      }
+    }
   </script>
 </body>
 </html>
