@@ -165,13 +165,10 @@ textarea {
     pointer-events: auto !important;
   }
 
-  // 对话气泡 - 红蓝配色
-  // display:block 覆盖 CDN 的 display:none，初始 opacity:0 隐藏
-  // JS 的 showWaifuTips() 会设 opacity:1 触发显示
+  // 对话气泡 - 红蓝配色，仅覆盖外观
+  // 显隐由 CDN waifu.css 的 .waifu-tips-active class 控制 (opacity 0→1)
   #waifu-tips {
     z-index: 300 !important;
-    display: block !important;
-    opacity: 0;
     pointer-events: none;
     background: linear-gradient(135deg, #FB7299 0%, #4A90D9 100%) !important;
     color: #fff !important;
@@ -182,6 +179,5 @@ textarea {
     line-height: 1.5 !important;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
     box-shadow: 0 2px 12px rgba(251, 114, 153, 0.3);
-    transition: opacity 0.3s !important;
   }
 }

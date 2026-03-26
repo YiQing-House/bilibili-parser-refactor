@@ -258,10 +258,9 @@ async function identifyBgCharacter() {
     // 通过看板娘气泡显示结果
     const tips = document.getElementById('waifu-tips')
     if (tips) {
-      tips.textContent = reply.length > 200 ? reply.slice(0, 200) + '...' : reply
-      tips.style.opacity = '1'
-      tips.style.visibility = 'visible'
-      setTimeout(() => { tips.style.opacity = '0' }, 15000)
+      tips.innerHTML = reply.length > 200 ? reply.slice(0, 200) + '...' : reply
+      tips.classList.add('waifu-tips-active')
+      setTimeout(() => { tips.classList.remove('waifu-tips-active') }, 15000)
     } else {
       showToast(reply.length > 100 ? reply.slice(0, 100) + '...' : reply, 'info')
     }

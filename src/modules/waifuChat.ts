@@ -20,21 +20,20 @@ function truncateReply(text: string, maxLen = 150): string {
   return text.slice(0, maxLen) + '…'
 }
 
-// 原生气泡（用于 AI 回复）
+// 原生气泡（用于 AI 回复）— 使用 CDN waifu-tips-active class 控制显隐
 let tipsTimer: ReturnType<typeof setTimeout> | null = null
 function showWaifuTips(text: string, duration = 6000) {
   const tips = document.getElementById('waifu-tips')
   if (!tips) return
   // 清除上一条消息的隐藏定时器
   if (tipsTimer) clearTimeout(tipsTimer)
-  tips.textContent = text
-  // 强制覆盖第三方库可能的隐藏行为
-  tips.style.display = 'block'
-  tips.style.visibility = 'visible'
-  tips.style.opacity = '1'
-  tips.style.transition = 'opacity 0.3s'
+  tips.innerHTML = text
+  tips.classList.add('waifu-tips-active')
+  // 同步第三方库的优先级机制
+  sessionStorage.setItem('waifu-message-priority', '10')
   tipsTimer = setTimeout(() => {
-    tips.style.opacity = '0'
+    tips.classList.remove('waifu-tips-active')
+    sessionStorage.removeItem('waifu-message-priority')
     tipsTimer = null
   }, duration)
 }
