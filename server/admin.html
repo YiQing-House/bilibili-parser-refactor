@@ -625,7 +625,11 @@
         const json = await res.json();
         if (json.success && json.data) {
           contentEl.value = json.data;
-          toast('✨ AI 改写完成，已自动填入', 'ok');
+          // 视觉反馈：绿色闪烁边框
+          contentEl.style.borderColor = '#2ed573';
+          contentEl.style.boxShadow = '0 0 12px rgba(46,213,115,0.4)';
+          setTimeout(() => { contentEl.style.borderColor = ''; contentEl.style.boxShadow = ''; }, 2000);
+          toast('✨ AI 改写完成，内容已更新！', 'ok');
         } else {
           toast('❌ ' + (json.error || '改写失败'), 'err');
         }
