@@ -178,30 +178,15 @@ router.post('/admin/ai-rewrite', async (req, res) => {
         messages: [
           {
             role: 'system',
-            content: `你是一个专业的软件更新公告编辑。请将用户提供的更新内容改写为更加精炼、专业的版本。
-
-【重要】你必须对内容做出实质性修改，不能原样返回！即使原文已经不错，也要：
-- 换一种更好的措辞表达
-- 调整 emoji 图标选择（可用：🔧🛠️✨🎨💡🚀📱🔐🎭📢🌟💬⚡🎯🔄等）
-- 优化语句顺序和节奏感
-- 让每条描述更简练有力
-
-格式要求：
-1. 每条更新用 | 分隔，一行展示
-2. 每条前加合适的 emoji
-3. 输出纯文本，不用 markdown
-4. 不要加标题
-
-示例：
-✨ 全新二维码登录体验 | 🎭 看板娘对话气泡修复 | 📢 通告系统升级 | 🚀 APP下载入口优化`
+            content: '你是更新公告编辑。用户会给你一段更新日志，请用不同的措辞重新表达，要求：每条用 | 分隔、每条前加emoji、语言简洁有力、必须和原文措辞不同。只输出改写后的纯文本，不要标题不要markdown。'
           },
           {
             role: 'user',
-            content: `${title ? '标题：' + title + '\n' : ''}更新内容草稿：\n${content}`
+            content: `请改写以下更新内容，必须换不同的措辞和emoji：\n${content}`
           }
         ],
         max_tokens: 500,
-        temperature: 0.7,
+        temperature: 0.9,
       },
       {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
@@ -209,6 +194,7 @@ router.post('/admin/ai-rewrite', async (req, res) => {
       }
     )
 
+    console.log('[AI Rewrite] 原始响应:', JSON.stringify(resp.data?.choices?.[0]))
     const rewritten = resp.data?.choices?.[0]?.message?.content || ''
     if (rewritten) {
       res.json({ success: true, data: rewritten.trim() })
