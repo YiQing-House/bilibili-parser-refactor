@@ -28,6 +28,7 @@ dist-ssr
 _run_*.py
 server/announcement.json
 server/sessions.json
+server/public/apk/
 server/cache/
 server/downloads/
 server/logs/
