@@ -216,4 +216,63 @@ router.post('/admin/ai-rewrite', async (req, res) => {
   }
 })
 
+// AI 聊天（管理面板通告助手）
+router.post('/admin/ai-chat', async (req, res) => {
+  const { password, message, history } = req.body
+  if (password !== ADMIN_PASSWORD) {
+    return res.status(403).json({ success: false, error: '密码错误' })
+  }
+  if (!message) {
+    return res.status(400).json({ success: false, error: '消息不能为空' })
+  }
+
+  const apiKey = process.env.GLM_API_KEY
+  const glmModel = process.env.GLM_MODEL || 'glm-4.5-air'
+  if (!apiKey) {
+    return res.status(500).json({ success: false, error: '未配置 GLM_API_KEY' })
+  }
+
+  try {
+    const axios = require('axios')
+    const messages = [
+      {
+        role: 'system',
+        content: `你是 QYBILI 项目的通告编辑助手。你的任务是帮助管理员撰写软件更新公告。
+要求：
+1. 当管理员描述更新内容时，生成简洁专业的更新公告文案
+2. 使用 emoji 图标分类（🔧修复、✨新增、🎨优化、📱移动端、🔐安全等）
+3. 每条更新用 | 分隔，紧凑一行
+4. 如果管理员只是闲聊，正常回复即可，不需要强行生成公告
+5. 输出纯文本，不用 markdown
+6. 称呼管理员为"主人"，语气亲切但专业`
+      }
+    ]
+
+    // 添加历史对话
+    if (Array.isArray(history)) {
+      for (const h of history.slice(-8)) {
+        if (h.role === 'user' || h.role === 'assistant') {
+          messages.push({ role: h.role, content: h.content })
+        }
+      }
+    }
+    messages.push({ role: 'user', content: message })
+
+    const resp = await axios.post(
+      'https://open.bigmodel.cn/api/paas/v4/chat/completions',
+      { model: glmModel, messages, max_tokens: 500, temperature: 0.7 },
+      {
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        timeout: 15000,
+      }
+    )
+
+    const reply = resp.data?.choices?.[0]?.message?.content || ''
+    res.json({ success: true, data: reply.trim() })
+  } catch (err) {
+    console.error('[AI Chat] 错误:', err.message)
+    res.status(500).json({ success: false, error: 'AI 回复失败' })
+  }
+})
+
 module.exports = router

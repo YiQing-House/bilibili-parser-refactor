@@ -89,6 +89,26 @@
     .confirm-btns button { flex: 1; padding: 8px; border-radius: 8px; cursor: pointer; font-size: 0.85rem; border: none; }
     .confirm-btns .yes { background: #ff4757; color: white; }
     .confirm-btns .no { background: #16213e; border: 1px solid #333; color: #e0e0e0; }
+
+    /* AI 聊天面板 */
+    .ai-fab { position: fixed; right: 24px; bottom: 24px; width: 52px; height: 52px; border-radius: 50%; background: linear-gradient(135deg, #667eea, #764ba2); border: none; color: #fff; font-size: 1.5rem; cursor: pointer; box-shadow: 0 4px 20px rgba(102,126,234,0.4); z-index: 900; transition: transform 0.2s; }
+    .ai-fab:hover { transform: scale(1.1); }
+    .ai-panel { position: fixed; right: 24px; bottom: 88px; width: 380px; max-height: 520px; background: #1a1a2e; border: 1px solid #333; border-radius: 16px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); z-index: 900; display: flex; flex-direction: column; overflow: hidden; }
+    .ai-panel.hidden { display: none; }
+    .ai-header { padding: 14px 18px; background: linear-gradient(135deg, #667eea, #764ba2); display: flex; justify-content: space-between; align-items: center; }
+    .ai-header span { font-weight: 600; font-size: 0.95rem; }
+    .ai-header button { background: none; border: none; color: rgba(255,255,255,0.8); cursor: pointer; font-size: 1.1rem; }
+    .ai-messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-height: 200px; max-height: 340px; }
+    .ai-msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; font-size: 0.85rem; line-height: 1.5; word-break: break-word; white-space: pre-wrap; }
+    .ai-msg.user { align-self: flex-end; background: linear-gradient(135deg, #667eea, #764ba2); color: #fff; border-bottom-right-radius: 4px; }
+    .ai-msg.ai { align-self: flex-start; background: #16213e; color: #e0e0e0; border-bottom-left-radius: 4px; }
+    .ai-msg .use-btn { display: inline-block; margin-top: 6px; padding: 3px 10px; background: rgba(251,114,153,0.15); border: 1px solid rgba(251,114,153,0.3); border-radius: 4px; color: #fb7299; font-size: 0.72rem; cursor: pointer; }
+    .ai-msg .use-btn:hover { background: rgba(251,114,153,0.25); }
+    .ai-input-row { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid #262640; }
+    .ai-input-row input { flex: 1; padding: 8px 12px; background: #16213e; border: 1px solid #333; border-radius: 8px; color: #e0e0e0; font-size: 0.85rem; outline: none; }
+    .ai-input-row input:focus { border-color: #667eea; }
+    .ai-input-row button { padding: 8px 14px; background: linear-gradient(135deg, #667eea, #764ba2); border: none; border-radius: 8px; color: #fff; cursor: pointer; font-size: 0.85rem; white-space: nowrap; }
+    .ai-input-row button:disabled { opacity: 0.5; }
   </style>
 </head>
 <body>
@@ -175,6 +195,26 @@
         <button class="no" onclick="confirmResolve(false)">取消</button>
         <button class="yes" onclick="confirmResolve(true)">确认</button>
       </div>
+    </div>
+  </div>
+
+  <!-- AI 聊天面板 -->
+  <button class="ai-fab" id="aiFab" onclick="toggleAiPanel()" title="AI 助手" style="display:none">🤖</button>
+  <div class="ai-panel hidden" id="aiPanel">
+    <div class="ai-header">
+      <span>🤖 AI 通告助手</span>
+      <div>
+        <button onclick="clearAiChat()" title="清空对话">🗑️</button>
+        <button onclick="toggleAiPanel()">✕</button>
+      </div>
+    </div>
+    <div class="ai-messages" id="aiMessages">
+      <div class="ai-msg ai">你好主人！我是通告编辑助手 😊
+可以告诉我这次更新了什么，我来帮你写通告内容～</div>
+    </div>
+    <div class="ai-input-row">
+      <input type="text" id="aiInput" placeholder="告诉 AI 你想写什么..." onkeydown="if(event.key==='Enter'&&!event.shiftKey)sendAiMsg()">
+      <button id="aiSendBtn" onclick="sendAiMsg()">发送</button>
     </div>
   </div>
 
@@ -480,7 +520,94 @@
 
     function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
-    // AI 改写通告内容
+    // ---- AI 聊天面板 ----
+    const aiChatHistory = [];
+
+    // 登录成功后显示 FAB
+    const origVerify = verifyAndEnter;
+    // 已经在 autoLogin/unlock 中调用，我们 hook 它
+    const _origSavePwd = savePwd;
+    function hookShowFab() {
+      document.getElementById('aiFab').style.display = 'block';
+    }
+    // 简单方法：监听 mainPanel 显示
+    new MutationObserver(() => {
+      if (document.getElementById('mainPanel').style.display !== 'none') hookShowFab();
+    }).observe(document.getElementById('mainPanel'), { attributes: true, attributeFilter: ['style'] });
+
+    function toggleAiPanel() {
+      document.getElementById('aiPanel').classList.toggle('hidden');
+    }
+
+    function clearAiChat() {
+      aiChatHistory.length = 0;
+      document.getElementById('aiMessages').innerHTML = '<div class="ai-msg ai">你好主人！我是通告编辑助手 😊\n可以告诉我这次更新了什么，我来帮你写通告内容～</div>';
+    }
+
+    function addAiMsg(text, role, showUseBtn) {
+      const box = document.getElementById('aiMessages');
+      const div = document.createElement('div');
+      div.className = 'ai-msg ' + role;
+      div.textContent = text;
+      if (showUseBtn && role === 'ai') {
+        const btn = document.createElement('button');
+        btn.className = 'use-btn';
+        btn.textContent = '📋 填入内容框';
+        btn.onclick = () => {
+          // 填入当前可见的内容框（发布或编辑）
+          const editModal = document.getElementById('editModal');
+          const targetId = (editModal.style.display !== 'none') ? 'editContent' : 'content';
+          document.getElementById(targetId).value = text;
+          toast('✅ 已填入内容框', 'ok');
+        };
+        div.appendChild(document.createElement('br'));
+        div.appendChild(btn);
+      }
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    async function sendAiMsg() {
+      const input = document.getElementById('aiInput');
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+      addAiMsg(text, 'user');
+      aiChatHistory.push({ role: 'user', content: text });
+
+      const btn = document.getElementById('aiSendBtn');
+      btn.disabled = true;
+      btn.textContent = '思考中...';
+
+      // 显示思考中气泡
+      const thinkDiv = document.createElement('div');
+      thinkDiv.className = 'ai-msg ai';
+      thinkDiv.textContent = '✨ 思考中...';
+      document.getElementById('aiMessages').appendChild(thinkDiv);
+      document.getElementById('aiMessages').scrollTop = document.getElementById('aiMessages').scrollHeight;
+
+      try {
+        const res = await fetch('/api/admin/ai-chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd, message: text, history: aiChatHistory.slice(-10) }),
+        });
+        const json = await res.json();
+        thinkDiv.remove();
+        if (json.success && json.data) {
+          aiChatHistory.push({ role: 'assistant', content: json.data });
+          addAiMsg(json.data, 'ai', true);
+        } else {
+          addAiMsg('❌ ' + (json.error || '回复失败'), 'ai');
+        }
+      } catch {
+        thinkDiv.remove();
+        addAiMsg('❌ 网络错误', 'ai');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '发送';
+      }
+    }
     async function aiRewrite(contentId, titleId) {
       const contentEl = document.getElementById(contentId);
       const raw = contentEl.value.trim();
