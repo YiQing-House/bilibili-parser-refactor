@@ -332,7 +332,7 @@
       const ver = document.getElementById('version').value.trim();
       const date = document.getElementById('annDate').value;
       if (!ver) { toast('请先填写版本号', 'err'); return; }
-      document.getElementById('title').value = `QYBILI ver ${ver} (${date || new Date().toISOString().slice(0, 10)})`;
+      document.getElementById('title').value = `📢 QYBILI ver ${ver} (${date || new Date().toISOString().slice(0, 10)})`;
     }
 
     // 生成标题（编辑弹窗）
@@ -340,7 +340,7 @@
       const ver = document.getElementById('editVersion').value.trim();
       const date = document.getElementById('editDate').value;
       if (!ver) { toast('请先填写版本号', 'err'); return; }
-      document.getElementById('editTitle').value = `QYBILI ver ${ver} (${date || new Date().toISOString().slice(0, 10)})`;
+      document.getElementById('editTitle').value = `📢 QYBILI ver ${ver} (${date || new Date().toISOString().slice(0, 10)})`;
     }
 
     // 解析标题中的版本号和日期
