@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>通告管理 - 视频去水印助手</title>
+  <title>通告管理 - QYBILI</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a1a; color: #e0e0e0; min-height: 100vh; }
@@ -114,8 +114,11 @@
       <!-- 新增通告 -->
       <div class="card">
         <h2>✏️ 发布新通告</h2>
-        <label>通告标题</label>
-        <input type="text" id="title" placeholder="例如：系统维护通知">
+        <label>版本号</label>
+        <input type="text" id="version" placeholder="例如：4.2.1" style="width:120px;display:inline-block;margin-right:10px">
+        <label>日期</label>
+        <input type="date" id="annDate" style="width:160px;display:inline-block">
+        <div style="margin-top:8px;font-size:0.8rem;color:#666">标题预览：<span id="titlePreview" style="color:#fb7299">QYBILI ver ?.?.? (????-??-??)</span></div>
         <label>通告内容（支持换行）</label>
         <textarea id="content" placeholder="在这里写通告内容..."></textarea>
         <div class="row">
@@ -314,11 +317,27 @@
       } catch { toast('加载失败', 'err'); }
     }
 
+    // 标题预览实时更新
+    document.getElementById('version').addEventListener('input', updateTitlePreview);
+    document.getElementById('annDate').addEventListener('input', updateTitlePreview);
+    // 默认填入今天日期
+    document.getElementById('annDate').value = new Date().toISOString().slice(0, 10);
+    updateTitlePreview();
+
+    function updateTitlePreview() {
+      const ver = document.getElementById('version').value || '?.?.?';
+      const date = document.getElementById('annDate').value || '????-??-??';
+      document.getElementById('titlePreview').textContent = `QYBILI ver ${ver} (${date})`;
+    }
+
     async function publish() {
       if (!pwd) { toast('未验证密码', 'err'); return; }
-      const title = document.getElementById('title').value;
+      const version = document.getElementById('version').value.trim();
+      const annDate = document.getElementById('annDate').value;
       const content = document.getElementById('content').value;
-      if (!title && !content) { toast('请填写通告内容', 'err'); return; }
+      if (!version) { toast('请填写版本号', 'err'); return; }
+      if (!content) { toast('请填写通告内容', 'err'); return; }
+      const title = `QYBILI ver ${version} (${annDate || new Date().toISOString().slice(0, 10)})`;
       try {
         const res = await fetch('/api/admin/announcement', {
           method: 'POST',
@@ -332,7 +351,7 @@
         const json = await res.json();
         if (json.success) {
           toast('✅ 通告已发布', 'ok');
-          document.getElementById('title').value = '';
+          document.getElementById('version').value = '';
           document.getElementById('content').value = '';
           await loadHistory();
         } else {
